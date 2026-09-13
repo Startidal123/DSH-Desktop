@@ -217,10 +217,10 @@ export class DshRuntime {
       return {
         kind: 'tool',
         name: m.name,
-        arguments: typeof m.arguments === 'string' ? m.arguments.slice(0, 600) : '',
+        arguments: typeof m.arguments === 'string' ? m.arguments.slice(0, 8000) : '',
         status: m.status,
         isError: m.isError === true,
-        result: this.stripBlocks(m.result, 500),
+        result: this.stripBlocks(m.result, 5000),
         time: m.time,
       }
     }
@@ -229,7 +229,7 @@ export class DshRuntime {
       role: m.role,
       source: m.source,
       time: m.time,
-      content: this.stripBlocks(m.content, 4000),
+      content: this.stripBlocks(m.content, 50000),
     }
   }
 

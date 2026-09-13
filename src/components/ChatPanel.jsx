@@ -124,7 +124,7 @@ function summarizeArgs(raw) {
 function resultText(blocks) {
   if (!Array.isArray(blocks)) return ''
   const text = blocks.filter(b => b?.type === 'text').map(b => b.text).join('\n')
-  return text.length > 400 ? text.slice(0, 399) + '…' : text
+  return text.length > 5000 ? text.slice(0, 4999) + '…' : text
 }
 
 function ToolCard({ msg, hit, current, idx }) {
@@ -194,7 +194,29 @@ function CopyButton({ getText, title }) {
 
 const COLLAPSE_THRESHOLD = 600
 
-function CollapsibleText({ html }) {
+const COLLAPSE_STORE_KEY = 'dsh-collapsed-msgs'
+const loadCollapsedMap = () => {
+  try { return JSON.parse(localStorage.getItem(COLLAPSE_STORE_KEY)) || {} } catch { return {} }
+}
+const storeCollapsed = (key, collapsed) => {
+  if (!key) return
+  const map = loadCollapsedMap()
+  if (collapsed) map[key] = 1
+  else delete map[key]
+  const keys = Object.keys(map)
+  if (keys.length > 400) keys.slice(0, keys.length - 400).forEach(k => delete map[k])
+  try { localStorage.setItem(COLLAPSE_STORE_KEY, JSON.stringify(map)) } catch {}
+}
+const fingerprint = (s) => {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
+const msgCollapseKey = (sessionId, msg) => (sessionId && msg?.time)
+  ? `${sessionId}:${msg.time}:${fingerprint(firstText(msg?.content ?? []).slice(0, 200))}`
+  : null
+
+function CollapsibleText({ html, msgKey }) {
   const [collapsed, setCollapsed] = useState(false)
   const [overflow, setOverflow] = useState(false)
   const bodyRef = useRef(null)
@@ -202,6 +224,9 @@ function CollapsibleText({ html }) {
     const el = bodyRef.current
     if (el) setOverflow(el.scrollHeight > COLLAPSE_THRESHOLD)
   }, [html])
+  useEffect(() => {
+    setCollapsed(msgKey ? !!loadCollapsedMap()[msgKey] : false)
+  }, [msgKey])
   if (!overflow) return <div className="markdown-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: html }} />
   return (
     <div className="collapse-wrap">
@@ -210,14 +235,18 @@ function CollapsibleText({ html }) {
         ref={bodyRef}
         dangerouslySetInnerHTML={{ __html: html }}
       />
-      <button className="collapse-btn" onClick={() => setCollapsed(c => !c)}>
+      <button className="collapse-btn" onClick={() => setCollapsed(c => {
+        const next = !c
+        storeCollapsed(msgKey, next)
+        return next
+      })}>
         {collapsed ? '展开全文' : '收起'}
       </button>
     </div>
   )
 }
 
-function AssistantMessage({ msg, onImageClick, idx, hit, current }) {
+function AssistantMessage({ msg, onImageClick, idx, hit, current, msgKey }) {
   const reasoning = reasoningText(msg.content)
   const html = useMemo(() => renderMarkdown(firstText(msg.content)), [msg.content])
   const cls = `msg-row assistant ${hit ? 'search-hit' : ''} ${current ? 'search-current' : ''}`
@@ -225,7 +254,7 @@ function AssistantMessage({ msg, onImageClick, idx, hit, current }) {
     <div className={cls} id={`msg-${idx}`}>
       <ReasoningBlock text={reasoning} />
       {html
-        ? <CollapsibleText html={html} />
+        ? <CollapsibleText html={html} msgKey={msgKey} />
         : <div className="bubble placeholder">{msg.interrupted ? '（回复被中断）' : '（无文本输出）'}</div>}
       <div className="msg-meta">
         <span className="msg-time">{fmtMsgTime(msg.time)}</span>
@@ -236,7 +265,7 @@ function AssistantMessage({ msg, onImageClick, idx, hit, current }) {
   )
 }
 
-function Message({ msg, onImageClick, idx, hit, current }) {
+function Message({ msg, onImageClick, idx, hit, current, msgKey }) {
   const searchCls = `${hit ? 'search-hit' : ''} ${current ? 'search-current' : ''}`.trim()
   if (msg.kind === 'note') {
     return <div className={`note-row ${searchCls}`} id={`msg-${idx}`}>{msg.note}</div>
@@ -295,7 +324,7 @@ function Message({ msg, onImageClick, idx, hit, current }) {
       </div>
     )
   }
-  if (msg.kind === 'assistant') {    return <AssistantMessage msg={msg} idx={idx} hit={hit} current={current} />
+  if (msg.kind === 'assistant') {    return <AssistantMessage msg={msg} idx={idx} hit={hit} current={current} msgKey={msgKey} />
   }
   return null
 }
@@ -541,6 +570,7 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
               idx={i}
               hit={findMatches.includes(i)}
               current={findMatches[findIdx] === i}
+              msgKey={msgCollapseKey(session?.id, m)}
             />
           ))
         )}
