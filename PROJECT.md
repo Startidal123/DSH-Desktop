@@ -105,6 +105,8 @@ D:\dsh\
 
 GitHub 单文件 100MB 上限放不下 189MB 的 exe，`npm run publish` 同时维护一个 **client 分支**（~3MB）：`setup.bat` + `rcedit-x64.exe` + `icon.ico` + 完整 payload。新机器流程：仓库页面切 client 分支 → Download ZIP → 解压双击 setup.bat → curl 从 **npmmirror** 拉 Electron 运行时（115MB，不走系统代理——PS Invoke-WebRequest 会撞代理的 TLS 坑）→ 组装 → rcedit 图标。**setup.bat 必须 GBK + CRLF**（cmd 解析器对 UTF-8 中文和 LF-only 都会错乱——两个历史坑，publish 脚本已自动转换）。已装客户端的机器永远不用这个分支（main 自动热更新）。
 
+**publish 幂等性**（防 GitHub 噪音）：对 payload 实际内容（dist+electron+patches+package.json+README+setup 模板+rcedit/icon+electron 版本）算 md5 存入 `version.json.contentHash`。哈希不变 → version.json 不重写（builtAt 不刷新）→ main 无提交、client 检测远端哈希一致直接跳过强推——零推送零通知。曾因 builtAt 无条件刷新导致每次 publish 都强推 client、GitHub 每次都弹"分支有更新"（历史坑，勿回退）。注意 vite 构建必须确定性（同源码同产物，已验证），否则幂等失效。
+
 ## DeepSeek 官方密钥（settings 内置）
 
 `config.dsApiKey` / `config.dsBaseUrl`：设置界面在**官方模型选中时**（`!activeCustom`）显示输入区。注入优先级 = 自定义模型凭证 > dsApiKey/dsBaseUrl > .env 文件（dsh-runtime start()）。改这两项触发 runtime 重启（needsRestart 列表）。hasApiKey 检测覆盖三来源。
