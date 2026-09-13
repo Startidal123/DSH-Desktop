@@ -259,13 +259,11 @@ button {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.user-msg-time {
+.user-msg-meta {
   align-self: flex-end;
-  margin-top: 5px;
-  opacity: 0;
-  transition: opacity 0.15s;
+  margin-top: 4px;
 }
-.msg-row.user:hover .user-msg-time { opacity: 1; }
+.msg-row.user:hover .msg-meta { opacity: 1; }
 
 /* ---------- in-conversation find bar ---------- */
 .find-bar {
@@ -1307,7 +1305,8 @@ button {
   transition: color 0.12s;
 }
 .copy-btn:hover { color: var(--accent); border-color: transparent; }
-.msg-meta { margin-top: 7px; gap: 14px; opacity: 0; transition: opacity 0.15s; align-items: center; }
+.msg-meta { display: flex; align-items: center; gap: 6px; margin-top: 8px; opacity: 0; transition: opacity 0.15s; }
+.msg-meta .msg-time { position: relative; top: -2px; }
 
 .note-row {
   align-self: center;

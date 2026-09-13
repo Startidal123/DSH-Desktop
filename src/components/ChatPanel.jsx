@@ -287,7 +287,10 @@ function Message({ msg, onImageClick, idx, hit, current }) {
           {(body || inlineImages.length === 0) && (
             <div className="bubble user-bubble">{body || '（非文本内容）'}</div>
           )}
-          <div className="msg-time user-msg-time">{fmtMsgTime(msg.time)}</div>
+          <div className="msg-meta user-msg-meta">
+            <span className="msg-time">{fmtMsgTime(msg.time)}</span>
+            {body && <CopyButton getText={() => body} title="复制" />}
+          </div>
         </div>
       </div>
     )
