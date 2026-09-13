@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { renderMarkdown, firstText, reasoningText, formatTokens } from '../markdown.js'
-import { IconSend, IconTool, IconChevron, IconImage, IconX, IconFolder, IconHammer, IconPlan } from './Icons.jsx'
+import { IconSend, IconTool, IconChevron, IconImage, IconX, IconFolder, IconHammer, IconPlan, IconDownload } from './Icons.jsx'
 
 const StopIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -8,16 +8,28 @@ const StopIcon = () => (
   </svg>
 )
 
-function Lightbox({ src, onClose }) {
+function Lightbox({ image, onClose }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
-  if (!src) return null
+  if (!image) return null
+
+  const save = async () => {
+    const res = await window.dsh.saveImage({
+      ...(image.data ? { base64: image.data } : { attachmentName: image.path }),
+      suggestedName: image.name || `dsh-image.${image.mimeType?.split('/')[1] ?? 'png'}`,
+    })
+    if (res.ok && !res.canceled && !res.path?.endsWith?.('.')) { /* saved */ }
+  }
+
   return (
     <div className="lightbox" onClick={onClose}>
-      <img src={src} alt="查看图片" onClick={e => e.stopPropagation()} />
+      <img src={image.src} alt="查看图片" onClick={e => e.stopPropagation()} />
+      <button className="lightbox-save" title="保存到本地" onClick={e => { e.stopPropagation(); save() }}>
+        <IconDownload size={17} />
+      </button>
       <button className="lightbox-close" onClick={onClose}>
         <IconX size={16} />
       </button>
@@ -211,7 +223,12 @@ function Message({ msg, onImageClick }) {
                   className="msg-image clickable"
                   src={srcOf(img)}
                   alt="用户图片"
-                  onClick={() => onImageClick?.(srcOf(img))}
+                  onClick={() => onImageClick?.({
+                    src: srcOf(img),
+                    data: img.data,
+                    path: img.path,
+                    mimeType: img.mimeType,
+                  })}
                 />
               ))}
             </div>
@@ -435,6 +452,16 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
                 <div key={i} className="image-preview">
                   <img src={`data:${img.mimeType};base64,${img.data}`} alt={img.name} />
                   <button
+                    className="image-preview-save"
+                    title={`保存 ${img.name}`}
+                    onClick={() => window.dsh.saveImage({
+                      base64: img.data,
+                      suggestedName: img.name || `dsh-image.${img.mimeType?.split('/')[1] ?? 'png'}`,
+                    })}
+                  >
+                    <IconDownload size={11} />
+                  </button>
+                  <button
                     className="image-preview-del"
                     title={`移除 ${img.name}`}
                     onClick={() => setImages(prev => prev.filter((_, j) => j !== i))}
@@ -524,7 +551,7 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
         </button>
         </div>
       </footer>
-      <Lightbox src={lightbox} onClose={() => setLightbox(null)} />
+      <Lightbox image={lightbox} onClose={() => setLightbox(null)} />
     </section>
   )
 }

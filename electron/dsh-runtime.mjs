@@ -87,6 +87,7 @@ export class DshRuntime {
     this.pending = new Map()
     this.buffer = ''
     this.stderrTail = []
+    this.stderrHead = ''
     this.sessions = new Map()
     this.activeId = null
     this.initializePromise = null
@@ -380,6 +381,9 @@ export class DshRuntime {
     this.child.stderr.on('data', chunk => {
       this.stderrTail.push(chunk)
       if (this.stderrTail.length > 40) this.stderrTail.shift()
+      // keep the head too: ERR_MODULE_NOT_FOUND puts the module name in the
+      // FIRST line, and a tail-only slice cuts it off exactly when it matters
+      if (this.stderrHead.length < 700) this.stderrHead += chunk
       // surface runtime diagnostics live instead of only after a crash
       process.stdout.write(`[dsh-runtime] ${chunk}`)
     })
@@ -393,7 +397,11 @@ export class DshRuntime {
       // a deliberate restart announces itself via start() → 'starting';
       // only unexpected exits surface as 'dead'
       if (this.restarting) return
-      this.onRuntime('dead', { code, stderr: this.stderrTail.join('').slice(-4000) })
+      this.onRuntime('dead', {
+        code,
+        stderrHead: this.stderrHead.slice(0, 700),
+        stderr: this.stderrTail.join('').slice(-4000),
+      })
     })
     // a custom endpoint may cap output far below the DeepSeek default
     // (e.g. Volcano GLM-5.3-Flash rejects max_tokens > 131072), so its own
@@ -435,6 +443,7 @@ export class DshRuntime {
     }
     this.dead = false
     this.stderrTail = []
+    this.stderrHead = ''
     await this.ensureStarted()
   }
 

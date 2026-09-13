@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('dsh', {
   addCustomModel: (entry) => ipcRenderer.invoke('dsh:addCustomModel', entry),
   removeCustomModel: (provider) => ipcRenderer.invoke('dsh:removeCustomModel', provider),
   pickWorkspace: () => ipcRenderer.invoke('dsh:pickWorkspace'),
+  saveImage: (payload) => ipcRenderer.invoke('dsh:saveImage', payload),
   onSnapshot: (cb) => subscribe('dsh:snapshot', cb),
   onRuntime: (cb) => subscribe('dsh:runtime', cb),
 })

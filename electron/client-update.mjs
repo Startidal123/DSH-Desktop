@@ -81,20 +81,20 @@ const PAYLOAD_FILES = ['package.json', 'version.json', 'README.md']
 export async function clientUpdate({ appDir, repoUrl, gitBin = 'git', skipCommit = '', userDataDir = '', onStep }) {
   appDir = resolve(appDir)
   if (!repoUrl) throw new Error('未配置客户端更新仓库地址')
-  onStep?.('检查客户端更新…')
+  onStep?.('check', '检查客户端更新…')
   const remote = await remoteHead(repoUrl, gitBin)
   if (!remote.ok) throw new Error('无法连接客户端发布仓库（直连与镜像均失败）')
   const current = clientStatus(appDir).commit
   if (current === remote.sha) {
-    onStep?.('客户端已是最新')
+    onStep?.('current', '客户端已是最新')
     return { updated: false, mainChanged: false, head: remote.sha }
   }
   if (skipCommit && remote.sha === skipCommit) {
-    onStep?.('远端版本此前启动失败已跳过（手动检查可重试）')
+    onStep?.('skip', '远端版本此前启动失败已跳过（手动检查可重试）')
     return { updated: false, mainChanged: false, head: remote.sha, skipped: true }
   }
 
-  onStep?.(current ? `拉取客户端更新（${remote.sha.slice(0, 8)}）…` : `拉取客户端（${remote.sha.slice(0, 8)}）…`)
+  onStep?.('fetch', current ? `拉取客户端更新（${remote.sha.slice(0, 8)}）…` : `拉取客户端（${remote.sha.slice(0, 8)}）…`)
   const tmp = join(tmpdir(), `dsh-client-payload-${Date.now()}`)
   rmSync(tmp, { recursive: true, force: true })
   let cloned = false
@@ -117,7 +117,7 @@ export async function clientUpdate({ appDir, repoUrl, gitBin = 'git', skipCommit
     throw new Error('发布仓库缺少主进程入口，已拒绝更新')
   }
 
-  onStep?.('应用更新…')
+  onStep?.('apply', '应用更新…')
   const resources = dirname(appDir)
   const appNext = join(resources, 'app-next')
   rmSync(appNext, { recursive: true, force: true })
@@ -153,7 +153,7 @@ export async function clientUpdate({ appDir, repoUrl, gitBin = 'git', skipCommit
     throw new Error('更新文件交换失败（文件被占用），本次更新已放弃，客户端不受影响')
   }
 
-  onStep?.(changed ? '客户端已更新（主进程变更，即将重启）' : '客户端已更新（界面变更，刷新窗口生效）')
+  onStep?.('done', changed ? '客户端已更新（主进程变更，即将重启）' : '客户端已更新（界面变更，刷新窗口生效）')
   // reset boot bookkeeping: the new payload starts with a clean slate (the
   // loader records its attempt, main.mjs records success on ready)
   if (userDataDir) {

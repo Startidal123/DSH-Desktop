@@ -103,7 +103,7 @@ function ensureRuntime() {
     (status, info) => {
       send('dsh:runtime', { status, info })
       if (status === 'ready') reconnectAttempt = 0
-      if (status === 'dead') scheduleReconnect()
+      if (status === 'dead') handleRuntimeDeath(info)
     },
     resolve(app.getPath('userData'), 'sessions.json'),
     attachmentsDir(),
@@ -159,11 +159,11 @@ function createWindow() {
     height: 900,
     minWidth: 1080,
     minHeight: 680,
-    backgroundColor: '#0d1117',
+    backgroundColor: '#f6f8fa',
     title: 'DeepSeek Harness',
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#10151d', symbolColor: '#e6edf3', height: 36 },
+    titleBarOverlay: { color: '#eef1f5', symbolColor: '#1f2328', height: 36 },
     ...(existsSync(devIcon) ? { icon: devIcon } : {}),
     webPreferences: {
       preload: resolve(import.meta.dirname, 'preload.mjs'),
@@ -239,6 +239,37 @@ app.whenReady().then(() => {
   })
 })
 
+let moduleNotFoundRepaired = false
+
+/** Runtime death triage: a broken harness install (missing node_modules entry
+ *  — partial install, AV quarantine, store corruption) fails with
+ *  ERR_MODULE_NOT_FOUND; clear the build stamp and force a full reinstall +
+ *  rebuild once, then the pipeline restarts the runtime itself. */
+function handleRuntimeDeath(info) {
+  const text = `${info?.stderrHead ?? ''}\n${info?.stderr ?? ''}`
+  try {
+    logCrash(`runtime exit code=${info?.code ?? '?'} head=${(info?.stderrHead ?? '').replace(/\n/g, ' | ').slice(0, 400)}`)
+  } catch { /* best effort */ }
+  if (!moduleNotFoundRepaired && /ERR_MODULE_NOT_FOUND|Cannot find (module|package)/.test(text)) {
+    moduleNotFoundRepaired = true
+    send('dsh:runtime', { status: 'starting', info: { autoRepair: true } })
+    ;(async () => {
+      try {
+        const rt = ensureRuntime()
+        try { rmSync(join(rt.config.harnessDir, '.dsh-build-stamp'), { force: true }) } catch { /* absent */ }
+        send('dsh:harnessProgress', { step: 'repair', text: '运行时依赖损坏（模块缺失），自动重装依赖并重建 harness…' })
+        const res = await runHarnessPipeline({ patchesOnly: true, silent: true })
+        if (res.ok) reconnectAttempt = 0
+        else scheduleReconnect()
+      } catch {
+        scheduleReconnect()
+      }
+    })()
+    return
+  }
+  scheduleReconnect()
+}
+
 function scheduleSilentUpdate(attempt = 0) {
   if (attempt > 20) return // ~10 min cap, next launch retries
   const rt = ensureRuntime()
@@ -290,11 +321,11 @@ async function runClientUpdate({ silent = false } = {}) {
       gitBin: tc.git,
       userDataDir: app.getPath('userData'),
       ...(badCommit ? { skipCommit: badCommit } : {}),
-      onStep: (text) => send('dsh:clientProgress', { text }),
+      onStep: (step, text) => send('dsh:clientProgress', { step, text }),
     })
     if (res.updated) {
       if (res.mainChanged) {
-        send('dsh:clientProgress', { text: '主进程已更新，重启生效…' })
+        send('dsh:clientProgress', { step: 'relaunch', text: '主进程已更新，重启生效…' })
         setTimeout(() => { app.relaunch(); app.quit() }, 1200)
         return { ok: true, ...res, relaunch: true }
       }
@@ -303,7 +334,7 @@ async function runClientUpdate({ silent = false } = {}) {
     }
     return { ok: true, ...res }
   } catch (err) {
-    send('dsh:clientProgress', { text: `客户端更新失败：${err.message ?? err}` })
+    send('dsh:clientProgress', { step: 'error', text: `客户端更新失败：${err.message ?? err}` })
     return { ok: false, error: String(err.message ?? err) }
   } finally {
     updatingClient = false
@@ -311,8 +342,8 @@ async function runClientUpdate({ silent = false } = {}) {
 }
 
 ipcMain.handle('dsh:clientStatus', () => {
-  if (!app.isPackaged) return { devMode: true, ...clientStatus(app.getAppPath()) }
-  return clientStatus(app.getAppPath())
+  if (!app.isPackaged) return { devMode: true, busy: updatingClient, ...clientStatus(app.getAppPath()) }
+  return { busy: updatingClient, ...clientStatus(app.getAppPath()) }
 })
 
 ipcMain.handle('dsh:clientUpdate', () => runClientUpdate())
@@ -413,11 +444,17 @@ ipcMain.handle('dsh:harnessStatus', async () => {
     harnessStatus(rt.config.harnessDir),
     toolchainStatus(appRoot),
   ])
-  return { ...status, tools }
+  return { ...status, tools, busy: updatingHarness }
 })
 
 ipcMain.handle('dsh:harnessUpdate', () => runHarnessPipeline())
-ipcMain.handle('dsh:applyHarnessPatches', () => runHarnessPipeline({ patchesOnly: true }))
+ipcMain.handle('dsh:applyHarnessPatches', async () => {
+  // manual invocation means "repair": force a full reinstall+rebuild instead
+  // of letting a matching build stamp skip the work
+  const rt = ensureRuntime()
+  try { rmSync(join(rt.config.harnessDir, '.dsh-build-stamp'), { force: true }) } catch { /* absent */ }
+  return runHarnessPipeline({ patchesOnly: true })
+})
 
 ipcMain.handle('dsh:configLocations', () => {
   const userData = app.getPath('userData')
@@ -648,6 +685,38 @@ ipcMain.handle('dsh:listChangePlans', async () => {
     return entries.sort((a, b) => b.mtime - a.mtime).slice(0, 20)
   } catch {
     return []
+  }
+})
+
+ipcMain.handle('dsh:saveImage', async (_e, { base64, attachmentName, suggestedName }) => {
+  let buffer = null
+  let name = suggestedName || ''
+  if (base64) {
+    buffer = Buffer.from(base64, 'base64')
+  } else if (attachmentName) {
+    // validated like the dshimg:// protocol handler — no path traversal
+    if (!/^[A-Za-z0-9-]+\.[a-z0-9]+$/i.test(attachmentName)) {
+      return { ok: false, error: 'invalid attachment name' }
+    }
+    const full = resolve(attachmentsDir(), attachmentName)
+    if (!existsSync(full)) return { ok: false, error: 'attachment not found' }
+    buffer = readFileSync(full)
+    if (!name) name = attachmentName
+  }
+  if (!buffer) return { ok: false, error: 'no image data' }
+  if (!name) name = `dsh-image-${Date.now()}.png`
+  const result = await dialog.showSaveDialog(win, {
+    defaultPath: join(app.getPath('downloads'), name),
+    filters: [
+      { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] },
+    ],
+  })
+  if (result.canceled || !result.filePath) return { ok: true, canceled: true }
+  try {
+    writeFileSync(result.filePath, buffer)
+    return { ok: true, path: result.filePath }
+  } catch (err) {
+    return { ok: false, error: String(err.message ?? err) }
   }
 })
 
