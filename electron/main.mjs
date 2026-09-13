@@ -160,17 +160,24 @@ function scheduleReconnect() {
 }
 
 function createWindow() {
+  // read the persisted theme BEFORE creating the window so background color
+  // and native caption buttons are correct from frame one — a post-creation
+  // setTitleBarOverlay call was still visibly late on some systems
+  let savedTheme = 'light'
+  try { savedTheme = loadSettings().config?.theme ?? 'light' } catch { /* defaults */ }
+  const savedPalette = OVERLAY_PALETTES[savedTheme] ?? OVERLAY_PALETTES.light
+
   const devIcon = join(appRoot, 'build', 'icon.ico')
   win = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 1080,
     minHeight: 680,
-    backgroundColor: '#f6f8fa',
+    backgroundColor: savedTheme === 'light' ? '#f6f8fa' : '#0d1117',
     title: 'DeepSeek Harness',
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
-    titleBarOverlay: OVERLAY_PALETTES.light,
+    titleBarOverlay: savedPalette,
     ...(existsSync(devIcon) ? { icon: devIcon } : {}),
     webPreferences: {
       preload: resolve(import.meta.dirname, 'preload.mjs'),
@@ -179,14 +186,6 @@ function createWindow() {
       sandbox: false,
     },
   })
-  // sync the native caption buttons to the saved theme before the renderer
-  // loads — the creation-time overlay is always light, dark users would see a
-  // wrong-tinted strip for the first frames otherwise
-  try {
-    const savedTheme = loadSettings().config?.theme ?? 'light'
-    win.setTitleBarOverlay(OVERLAY_PALETTES[savedTheme] ?? OVERLAY_PALETTES.light)
-  } catch { /* best effort */ }
-
   if (isDev) {
     win.webContents.session.clearCache().catch(() => {})
     win.loadURL('http://localhost:5173')
@@ -311,7 +310,7 @@ async function silentSelfUpdate() {
     if (remote.ok && remote.sha !== current.commit) {
       send('dsh:clientProgress', {
         step: 'available',
-        text: `发现新版本 ${remote.sha.slice(0, 8)}，在 设置 → 更新 中应用`,
+        text: `发现新版本（${remote.sha.slice(0, 8)}）`,
       })
     }
   }

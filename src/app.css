@@ -128,7 +128,7 @@ button {
 }
 
 .brand-whale { color: #4d6bfe; display: inline-flex; }
-.brand-name { font-weight: 700; font-size: 1rem; }
+.brand-name { font-weight: 700; font-size: 1.125rem; }
 .brand-tag {
   font-size: 0.5625rem;
   font-family: Consolas, monospace;
@@ -146,7 +146,7 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px 4px 18px;
+  padding: 6px 10px 4px 6px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
@@ -225,14 +225,14 @@ button {
 
 /* ---------- message timestamps ---------- */
 .msg-time {
-  font-size: 0.625rem;
+  font-size: 0.75rem;
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .user-msg-time {
   align-self: flex-end;
-  margin-top: 3px;
+  margin-top: 5px;
 }
 
 /* ---------- in-conversation find bar ---------- */
@@ -313,7 +313,7 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 24px 14px 8px 20px;
+  padding: 10px 14px 6px 20px;
   height: 48px;
   box-sizing: content-box;
   flex: none;
@@ -422,7 +422,7 @@ button {
 
 .sidebar-foot {
   display: flex;
-  gap: 4px;
+  gap: 10px;
   padding: 10px 14px;
   border-top: 1px solid var(--border-soft);
 }
@@ -1261,7 +1261,7 @@ button {
 .markdown-body pre code { background: none; border: none; padding: 0; font-size: 0.78125rem; line-height: 1.6; }
 .markdown-body a { color: #6ea0ff; }
 
-.msg-meta { margin-top: 5px; }
+.msg-meta { margin-top: 7px; gap: 6px; }
 .usage-tag {
   font-size: 0.6875rem;
   color: var(--text-faint);
@@ -1819,7 +1819,7 @@ button {
 }
 .zoom-reset:hover { color: var(--text); background: var(--bg-hover); }
 
-.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.field { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
 .field > span { font-size: 0.75rem; color: var(--text-dim); }
 .field input {
   background: var(--bg-panel);
@@ -1877,19 +1877,19 @@ button {
 .harness-section h4 {
   font-size: 0.78125rem;
   color: var(--text-dim);
-  margin-bottom: 6px;
+  margin-bottom: 10px;
   font-weight: 600;
 }
 .harness-status-line {
   font-size: 0.75rem;
   color: var(--text-dim);
   font-family: Consolas, monospace;
-  margin: 6px 0 4px;
+  margin: 8px 0 6px;
 }
 .harness-actions {
   display: flex;
-  gap: 8px;
-  margin: 6px 0 2px;
+  gap: 10px;
+  margin: 10px 0 6px;
 }
 .harness-log {
   font-size: 0.71875rem;
@@ -1932,14 +1932,14 @@ button {
 
 /* ---------- sidebar footer: bigger buttons + update badge ---------- */
 .sidebar-foot .icon-btn.foot-btn {
-  width: 38px;
-  height: 38px;
+  width: 42px;
+  height: 42px;
   position: relative;
 }
 .foot-badge {
   position: absolute;
-  top: 5px;
-  right: 5px;
+  top: 6px;
+  right: 6px;
   width: 8px;
   height: 8px;
   border-radius: 50%;

@@ -201,7 +201,7 @@ export default function Sidebar({ sessions, activeId, config, onSelect, onNew, o
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
-        <span className="brand-whale"><WhaleMark size={30} /></span>
+        <span className="brand-whale"><WhaleMark size={36} /></span>
         <span className="brand-name">DeepSeek</span>
         <span className="brand-tag">HARNESS</span>
       </div>
@@ -212,6 +212,7 @@ export default function Sidebar({ sessions, activeId, config, onSelect, onNew, o
       </button>
 
       <div className="session-mid">
+        <div className="session-top-spacer" />
         <ChangePlanCard />
         <div className="history-head">
           <span className="history-title">{q ? '' : '历史对话'}</span>

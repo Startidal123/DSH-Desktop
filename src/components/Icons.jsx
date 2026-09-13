@@ -16,10 +16,10 @@ export function LogoMark({ size = 28 }) {
   )
 }
 
-const icon = (path, viewBox = '0 0 24 24') => function Icon({ size = 18 }) {
+const icon = (path, viewBox = '0 0 24 24') => function Icon({ size = 18, className }) {
   return (
     <svg width={size} height={size} viewBox={viewBox} fill="none" stroke="currentColor"
-      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
       {path}
     </svg>
   )
