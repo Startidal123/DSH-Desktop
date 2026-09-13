@@ -500,6 +500,7 @@ ipcMain.handle('dsh:getState', () => {
   const rt = ensureRuntime()
   const hasApiKey = Boolean(
     (Array.isArray(rt.config.customModels) && rt.config.customModels.some(m => m.apiKey))
+    || rt.config.dsApiKey
     || process.env.DEEPSEEK_API_KEY
     || (existsSync(resolve(process.cwd(), '.env'))
       && readFileSync(resolve(process.cwd(), '.env'), 'utf8').includes('DEEPSEEK_API_KEY'))
@@ -573,7 +574,7 @@ ipcMain.handle('dsh:updateConfig', async (_e, partial) => {
   }
   rt.updateConfig(patch)
   saveSettings({ config: rt.config })
-  const needsRestart = ['provider', 'model', 'workspace', 'harnessDir', 'reasoningEffort', 'maxTokens', 'activeCustom']
+  const needsRestart = ['provider', 'model', 'workspace', 'harnessDir', 'reasoningEffort', 'maxTokens', 'activeCustom', 'dsApiKey', 'dsBaseUrl']
     .some(k => oldConfig[k] !== rt.config[k])
   if (needsRestart && rt.child) {
     try {

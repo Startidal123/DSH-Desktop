@@ -101,9 +101,17 @@ D:\dsh\
 - **发布仓库 .gitattributes = `* -text`**：二进制原样存储，杜绝 git 行尾转换破坏 md5 对比（publish 脚本自动生成）
 - **loader.mjs 路径计算陷阱**：import.meta.url 算出的是 electron/ 子目录，app 目录 = dirname(electron/)——历史上这里错位导致 app-old 永远找不到，改路径时勿回退
 
+## client 引导分支（免 zip 分发）
+
+GitHub 单文件 100MB 上限放不下 189MB 的 exe，`npm run publish` 同时维护一个 **client 分支**（~3MB）：`setup.bat` + `rcedit-x64.exe` + `icon.ico` + 完整 payload。新机器流程：仓库页面切 client 分支 → Download ZIP → 解压双击 setup.bat → curl 从 **npmmirror** 拉 Electron 运行时（115MB，不走系统代理——PS Invoke-WebRequest 会撞代理的 TLS 坑）→ 组装 → rcedit 图标。**setup.bat 必须 GBK + CRLF**（cmd 解析器对 UTF-8 中文和 LF-only 都会错乱——两个历史坑，publish 脚本已自动转换）。已装客户端的机器永远不用这个分支（main 自动热更新）。
+
+## DeepSeek 官方密钥（settings 内置）
+
+`config.dsApiKey` / `config.dsBaseUrl`：设置界面在**官方模型选中时**（`!activeCustom`）显示输入区。注入优先级 = 自定义模型凭证 > dsApiKey/dsBaseUrl > .env 文件（dsh-runtime start()）。改这两项触发 runtime 重启（needsRestart 列表）。hasApiKey 检测覆盖三来源。
+
 ## 4. 关键设计决策与历史教训（改代码前必读）
 
-1. **`.env` 与自定义模型凭证**：runtime env 注入优先级 = customModels[activeCustom] 的 baseURL/apiKey > dsh-client/.env > harness/.env > 进程环境。`hasApiKey` 检测要覆盖 `customModels.some(m=>m.apiKey)`（曾因只查废弃字段 `config.apiKey` 误报）。
+1. **凭证优先级**：runtime env 注入顺序 = customModels[activeCustom] 的 baseURL/apiKey > 官方模型设置 config.dsApiKey/dsBaseUrl（设置界面填写）> dsh-client/.env > harness/.env > 进程环境。`hasApiKey` 检测要覆盖 customModels.some(m=>m.apiKey) 与 dsApiKey（曾因只查废弃字段 `config.apiKey` 误报）。
 2. **provider 路由**：所有模型（含火山等自定义端点）一律走 `deepseek-official`（适配器支持 `DEEPSEEK_BASE_URL` 指向任意 OpenAI 兼容端点）；客户端标识存 `activeCustom`，**绝不**把 `custom-*` 传给 initialize（会 no adapter registered 崩溃，历史事故）。
 3. **maxTokens**：火山 flash 系上限 131072，harness 默认 256000 会被端点 400 拒绝（曾表现为"发消息无回复"，靠解压 session 日志定位 `turn/end reason:error`）。自定义模型各自存 maxTokens，initialize 时取激活模型的值。
 4. **多模态**：harness 对未编目模型按 text-only 处理并替换图片为占位文本。图片模型需登记 `~/.dsh/settings.yaml` 的 `llm-deepseek.models`（含 `inputModalities: [text, image]`；models 是**整体替换**，必须带上官方 4 个）。

@@ -16,6 +16,8 @@ const DEFAULT_CONFIG = {
   harnessAutoUpdate: true,
   clientUpdateRepo: 'https://github.com/Startidal123/DSH-Desktop',
   clientAutoUpdate: true,
+  dsApiKey: '',
+  dsBaseUrl: '',
 }
 
 function customModelActive(config) {
@@ -332,10 +334,15 @@ export class DshRuntime {
     for (const [k, v] of Object.entries(envVars)) {
       if (env[k] === undefined || env[k] === '') env[k] = v
     }
-    // active custom model credentials win over .env files
+    // credential priority: active custom model > official DeepSeek settings >
+    // .env files
     const active = customModelActive(this.config)
     if (active?.baseURL) env.DEEPSEEK_BASE_URL = active.baseURL
     if (active?.apiKey) env.DEEPSEEK_API_KEY = active.apiKey
+    if (!active) {
+      if (this.config.dsBaseUrl) env.DEEPSEEK_BASE_URL = this.config.dsBaseUrl
+      if (this.config.dsApiKey) env.DEEPSEEK_API_KEY = this.config.dsApiKey
+    }
     // the runtime only registers the official route; custom models ride it
     // through DEEPSEEK_BASE_URL, so a leaked custom-* provider id is fatal
     const provider = String(this.config.provider).startsWith('custom-')

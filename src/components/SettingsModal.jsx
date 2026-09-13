@@ -151,6 +151,9 @@ export default function SettingsModal({ config, hasApiKey, onClose, onSave, onPi
   const [repo, setRepo] = useState(config.harnessRepo ?? '')
   const [auto, setAuto] = useState(config.harnessAutoUpdate === true)
   const [locs, setLocs] = useState(null)
+  const [dsApiKey, setDsApiKey] = useState(config.dsApiKey ?? '')
+  const [dsBaseUrl, setDsBaseUrl] = useState(config.dsBaseUrl ?? '')
+  const officialSelected = !config.activeCustom
 
   useEffect(() => {
     window.dsh.configLocations().then(setLocs).catch(() => setLocs(null))
@@ -163,6 +166,7 @@ export default function SettingsModal({ config, hasApiKey, onClose, onSave, onPi
       harnessDir,
       harnessRepo: repo.trim(),
       harnessAutoUpdate: auto,
+      ...(officialSelected ? { dsApiKey: dsApiKey.trim(), dsBaseUrl: dsBaseUrl.trim() } : {}),
     })
     setSaving(false)
     onClose()
@@ -204,6 +208,32 @@ export default function SettingsModal({ config, hasApiKey, onClose, onSave, onPi
           <div className="field-hint">默认为客户端目录下 harness</div>
         </div>
 
+        {officialSelected && (
+          <div className="harness-section">
+            <h4>DeepSeek 官方模型密钥</h4>
+            <label className="field">
+              <span>API Key</span>
+              <input
+                type="password"
+                value={dsApiKey}
+                onChange={e => setDsApiKey(e.target.value)}
+                placeholder="sk-..."
+                autocomplete="off"
+              />
+            </label>
+            <label className="field">
+              <span>Base URL（可选，留空用官方默认）</span>
+              <input
+                value={dsBaseUrl}
+                onChange={e => setDsBaseUrl(e.target.value)}
+                placeholder="https://api.deepseek.com"
+                autocomplete="off"
+              />
+              <div className="field-hint">也可指向任意 OpenAI 兼容端点（配合上方模型下拉的官方目录使用）</div>
+            </label>
+          </div>
+        )}
+
         <div className="harness-section">
           <h4>客户端更新</h4>
           <ClientUpdateSection config={config} />
@@ -236,8 +266,10 @@ export default function SettingsModal({ config, hasApiKey, onClose, onSave, onPi
 
         <div className={`api-key-note ${hasApiKey ? 'ok' : 'warn'}`}>
           {hasApiKey
-            ? 'API 密钥已配置（自定义模型携带或 .env）'
-            : '未配置 API 密钥（三种方式任选）：① 模型下拉 → 添加自定义模型时填写 Key；② 在客户端目录（exe 同级）创建 .env 写入 DEEPSEEK_API_KEY=sk-...；③ 在 harness 目录的 .env 中写入后重启'}
+            ? 'API 密钥已配置（下方输入框、自定义模型或 .env 任一来源）'
+            : officialSelected
+              ? '未配置 API 密钥：在上方「DeepSeek 官方模型密钥」填入 API Key 即可使用官方模型'
+              : '未配置 API 密钥：当前为自定义模型，Key 在模型下拉的「添加自定义模型」里填写'}
         </div>
 
         <div className="modal-actions">

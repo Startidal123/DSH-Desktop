@@ -25,10 +25,14 @@
 
 ## 快速开始（客户端用户）
 
-1. 下载 Release 中的 zip（或克隆本仓库后 `npm install && npm run dist` 打包），解压运行 `DSH Client.exe`
-2. 打开 **设置 → Harness 更新 → 检查并更新**：自动下载便携工具链（git/pnpm）→ 克隆 harness → 应用补丁 → 构建，全程 5~10 分钟
-3. 配置 API 密钥（推荐：模型下拉 →「+ 添加自定义模型」→ 填 Base URL / API Key / 模型 ID）
-4. 欢迎页直接输入发送，自动创建新对话
+**方式一（推荐，免 zip）**：仓库切换到 **client 分支** → Download ZIP → 解压 → 双击 `setup.bat`（自动从国内镜像下载运行时并组装，1~3 分钟）
+
+**方式二**：`npm install && npm run dist` 本地打包。
+
+然后：
+1. 运行 `DSH Client.exe`，打开 **设置 → Harness 更新 → 检查并更新**：自动下载便携工具链（git/pnpm）→ 克隆 harness → 应用补丁 → 构建，全程 5~10 分钟
+2. 配置 API 密钥：官方模型在 **设置 → DeepSeek 官方模型密钥** 直接填写；自定义端点在模型下拉 →「+ 添加自定义模型」
+3. 欢迎页直接输入发送，自动创建新对话
 
 ## 功能速览
 
