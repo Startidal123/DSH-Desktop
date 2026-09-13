@@ -17,3 +17,4 @@ workspace/
 
 # payload staging (single-repo publish builds straight into dist/)
 payload-repo/
+.client-branch-tmp/
