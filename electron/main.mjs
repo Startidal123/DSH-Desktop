@@ -628,6 +628,9 @@ ipcMain.handle('dsh:updateConfig', async (_e, partial) => {
   }
   rt.updateConfig(patch)
   saveSettings({ config: rt.config })
+  if (typeof patch.workspace === 'string' && patch.workspace && oldConfig.workspace !== rt.config.workspace) {
+    rt.focusWorkspaceSession()
+  }
   const needsRestart = ['provider', 'model', 'workspace', 'harnessDir', 'reasoningEffort', 'maxTokens', 'activeCustom', 'dsApiKey', 'dsBaseUrl']
     .some(k => oldConfig[k] !== rt.config[k])
   if (needsRestart && rt.child) {

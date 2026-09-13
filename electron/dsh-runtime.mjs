@@ -101,6 +101,13 @@ export class DshRuntime {
 
   updateConfig(partial) {
     Object.assign(this.config, partial)
+    if (partial.workspace) {
+      let fixed = false
+      for (const s of this.sessions.values()) {
+        if (!s.workspace) { s.workspace = this.config.workspace; fixed = true }
+      }
+      if (fixed) this.persist()
+    }
   }
 
   /** Sessions ordered pinned-first then most-recently-active. */
@@ -307,6 +314,20 @@ export class DshRuntime {
       this.activeId = id
       this.emitSnapshot()
     }
+  }
+
+  /** After an interactive workspace switch, focus a fresh session in the new
+   *  workspace — reusing an untouched one so toggling back and forth doesn't
+   *  pile up empty conversations. */
+  focusWorkspaceSession() {
+    const ws = this.config.workspace || ''
+    const existing = this.orderedSessions()
+      .find(s => (s.workspace ?? '') === ws && s.messages.length === 0 && s.title === '新对话')
+    if (existing) {
+      this.selectSession(existing.id)
+      return existing.id
+    }
+    return this.newSession()
   }
 
   deleteSession(id) {
