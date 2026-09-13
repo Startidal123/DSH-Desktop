@@ -75,7 +75,7 @@ function ChangePlanCard() {
   )
 }
 
-export default function Sidebar({ sessions, activeId, config, onSelect, onNew, onDelete, onRename, onTogglePin, onOpenSettings, runtimeStatus, onRestart, onToggleTheme, theme }) {
+export default function Sidebar({ sessions, activeId, config, onSelect, onNew, onDelete, onRename, onTogglePin, onOpenSettings, runtimeStatus, onRestart, onToggleTheme, theme, updateBadge }) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [renaming, setRenaming] = useState(null)
@@ -99,6 +99,23 @@ export default function Sidebar({ sessions, activeId, config, onSelect, onNew, o
       document.removeEventListener('keydown', onKey)
     }
   }, [ctx])
+
+  // when the active session sits inside a collapsed workspace group, expand
+  // it (covers "新对话 while group collapsed → session invisible")
+  useEffect(() => {
+    if (!activeId) return
+    const active = sessions.find(s => s.id === activeId)
+    if (!active) return
+    const wsKey = active.workspace || config?.workspace || ''
+    if (collapsed.has(wsKey)) {
+      setCollapsed(prev => {
+        const next = new Set(prev)
+        next.delete(wsKey)
+        localStorage.setItem('dsh-ws-collapsed', JSON.stringify([...next]))
+        return next
+      })
+    }
+  }, [activeId, sessions, config?.workspace])
 
   const toggleCollapse = (ws) => {
     setCollapsed(prev => {
@@ -184,7 +201,7 @@ export default function Sidebar({ sessions, activeId, config, onSelect, onNew, o
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
-        <span className="brand-whale"><WhaleMark size={24} /></span>
+        <span className="brand-whale"><WhaleMark size={30} /></span>
         <span className="brand-name">DeepSeek</span>
         <span className="brand-tag">HARNESS</span>
       </div>
@@ -240,25 +257,26 @@ export default function Sidebar({ sessions, activeId, config, onSelect, onNew, o
       </div>
 
       <div className="sidebar-foot">
-        <button className="icon-btn" title="重启运行时" onClick={onRestart}>
-          <IconRefresh />
+        <button className="icon-btn foot-btn" title="重启运行时" onClick={onRestart}>
+          <IconRefresh size={20} />
         </button>
-        <button className="icon-btn" title={theme === 'light' ? '切换暗色' : '切换亮色'} onClick={onToggleTheme}>
+        <button className="icon-btn foot-btn" title={theme === 'light' ? '切换暗色' : '切换亮色'} onClick={onToggleTheme}>
           {theme === 'light' ? (
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
             </svg>
           ) : (
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <circle cx="12" cy="12" r="4" />
               <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
             </svg>
           )}
         </button>
-        <button className="icon-btn" title="设置" onClick={onOpenSettings}>
-          <IconSettings />
+        <button className="icon-btn foot-btn" title="设置" onClick={onOpenSettings}>
+          <IconSettings size={20} />
+          {updateBadge && <span className="foot-badge" />}
         </button>
       </div>
 

@@ -25,6 +25,7 @@ export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('dsh-theme') ?? 'light')
   const [harnessLines, setHarnessLines] = useState([])
   const [clientLines, setClientLines] = useState([])
+  const [updateBadge, setUpdateBadge] = useState(false)
   const [zoom, setZoomState] = useState(() => {
     const v = parseFloat(localStorage.getItem('dsh-zoom'))
     return Number.isFinite(v) && v >= 0.7 && v <= 1.5 ? v : 1
@@ -34,6 +35,9 @@ export default function App() {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('dsh-theme', theme)
     window.dsh.setNativeTheme?.(theme).catch?.(() => {})
+    // persist to settings.json too so the main process can sync the native
+    // caption buttons at window creation (no first-frame flash)
+    window.dsh.updateConfig?.({ theme }).catch?.(() => {})
   }, [theme])
 
   const applyZoom = useCallback((next) => {
@@ -75,6 +79,9 @@ export default function App() {
     window.dsh.getState().then(s => {
       setConfig(s.config)
       setHasApiKey(s.hasApiKey)
+      // theme may also live in settings.json (main reads it for the native
+      // buttons); if the renderer localStorage disagrees, settings wins
+      if (s.config?.theme && s.config.theme !== theme) setTheme(s.config.theme)
       // seed the runtime badge from the live process state; notifications alone
       // miss the current status after a renderer reload (HMR) or silent start
       if (s.runtime === 'ready') setRuntimeStatus('ready')
@@ -105,6 +112,9 @@ export default function App() {
 
     const offClient = window.dsh.onClientProgress(({ step, text }) => {
       setClientLines(prev => [...prev.slice(-(MAX_PROGRESS_LINES - 1)), text])
+      // silent check found a newer payload: badge the settings button until
+      // the user opens settings (the update tab is one click away)
+      if (step === 'available') setUpdateBadge(true)
     })
 
     const statusTimer = setInterval(async () => {
@@ -188,6 +198,7 @@ export default function App() {
         activeId={state.activeId}
         config={config}
         runtimeStatus={runtimeStatus}
+        updateBadge={updateBadge}
         onSelect={id => window.dsh.selectSession(id)}
         onNew={() => window.dsh.newSession()}
         onDelete={id => window.dsh.deleteSession(id)}
@@ -195,7 +206,7 @@ export default function App() {
         onTogglePin={id => window.dsh.togglePinSession(id)}
         onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
         theme={theme}
-        onOpenSettings={() => setShowSettings(true)}
+        onOpenSettings={() => { setUpdateBadge(false); setShowSettings(true) }}
         onRestart={async () => {
           setError('')
           const res = await window.dsh.restart()

@@ -128,7 +128,7 @@ button {
 }
 
 .brand-whale { color: #4d6bfe; display: inline-flex; }
-.brand-name { font-weight: 600; font-size: 0.875rem; }
+.brand-name { font-weight: 700; font-size: 1rem; }
 .brand-tag {
   font-size: 0.5625rem;
   font-family: Consolas, monospace;
@@ -544,7 +544,7 @@ button {
   color: var(--text);
   font-size: 0.8125rem;
   font-weight: 500;
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color 0.15s;
 }
 .model-trigger:hover:not(:disabled) { border-color: #3d4653; background: var(--bg-hover); }
 .model-trigger:disabled { opacity: 0.55; cursor: not-allowed; }
@@ -682,7 +682,7 @@ button {
   font-size: 0.71875rem;
   font-weight: 500;
   color: var(--text-dim);
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color 0.15s;
 }
 .effort-btn:hover:not(:disabled) { border-color: #3d4653; background: var(--bg-hover); }
 .effort-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -1026,7 +1026,7 @@ button {
   color: var(--text-dim);
   font-size: 0.6875rem;
   font-family: Consolas, monospace;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  transition: border-color 0.12s;
   flex: none;
 }
 .workspace-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--text); background: var(--bg-hover); }
@@ -1453,7 +1453,7 @@ button {
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: rgba(0, 0, 0, 0.82);
+  background: rgba(0, 0, 0, 0.55);
   display: grid;
   place-items: center;
   cursor: zoom-out;
@@ -1928,3 +1928,21 @@ button {
 ::-webkit-scrollbar-thumb { background: #2a3038; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #363d47; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+
+/* ---------- sidebar footer: bigger buttons + update badge ---------- */
+.sidebar-foot .icon-btn.foot-btn {
+  width: 38px;
+  height: 38px;
+  position: relative;
+}
+.foot-badge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bad);
+  border: 2px solid var(--bg-panel);
+}

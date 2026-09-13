@@ -14,6 +14,13 @@ if (forceSoftwareGpu) app.disableHardwareAcceleration()
 let win = null
 let runtime = null
 
+// native caption-button palettes shared by createWindow and setNativeTheme
+const OVERLAY_PALETTES = {
+  light: { color: '#eef1f5', symbolColor: '#1f2328', height: 36 },
+  dark: { color: '#10151d', symbolColor: '#e6edf3', height: 36 },
+  lightbox: { color: '#1a1a2e', symbolColor: '#5a5a6e', height: 36 },
+}
+
 /** Client root: project dir in dev, the exe's folder when packaged — harness
  *  and workspace default to siblings of the executable for portability. */
 const appRoot = app.isPackaged ? dirname(app.getPath('exe')) : resolve(app.getAppPath())
@@ -163,7 +170,7 @@ function createWindow() {
     title: 'DeepSeek Harness',
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#eef1f5', symbolColor: '#1f2328', height: 36 },
+    titleBarOverlay: OVERLAY_PALETTES.light,
     ...(existsSync(devIcon) ? { icon: devIcon } : {}),
     webPreferences: {
       preload: resolve(import.meta.dirname, 'preload.mjs'),
@@ -172,6 +179,14 @@ function createWindow() {
       sandbox: false,
     },
   })
+  // sync the native caption buttons to the saved theme before the renderer
+  // loads — the creation-time overlay is always light, dark users would see a
+  // wrong-tinted strip for the first frames otherwise
+  try {
+    const savedTheme = loadSettings().config?.theme ?? 'light'
+    win.setTitleBarOverlay(OVERLAY_PALETTES[savedTheme] ?? OVERLAY_PALETTES.light)
+  } catch { /* best effort */ }
+
   if (isDev) {
     win.webContents.session.clearCache().catch(() => {})
     win.loadURL('http://localhost:5173')
@@ -286,9 +301,19 @@ function scheduleSilentUpdate(attempt = 0) {
 async function silentSelfUpdate() {
   const cfg = ensureRuntime().config
   if (cfg.clientAutoUpdate !== false && cfg.clientUpdateRepo) {
-    const res = await runClientUpdate({ silent: true })
-    // a main-process change relaunches the app; harness check happens next boot
-    if (res?.ok && res.relaunch) return
+    // detect-only: if a new version exists, notify the renderer (badge on
+    // the settings button); the user applies it from 设置 → 更新
+    const tc = await ensureTools(appRoot, process.execPath, () => {})
+    const { remoteHead } = await import('./client-update.mjs')
+    const { clientStatus } = await import('./client-update.mjs')
+    const remote = await remoteHead(cfg.clientUpdateRepo, tc.git)
+    const current = clientStatus(app.getAppPath())
+    if (remote.ok && remote.sha !== current.commit) {
+      send('dsh:clientProgress', {
+        step: 'available',
+        text: `发现新版本 ${remote.sha.slice(0, 8)}，在 设置 → 更新 中应用`,
+      })
+    }
   }
   if (cfg.harnessAutoUpdate !== false) {
     await runHarnessPipeline({ silent: true })
@@ -478,12 +503,7 @@ ipcMain.handle('dsh:setNativeTheme', (_e, theme) => {
   // so the buttons recede into the dimmed overlay instead of glowing.
   if (!win || win.isDestroyed()) return { ok: false }
   try {
-    const palettes = {
-      light: { color: '#eef1f5', symbolColor: '#1f2328', height: 36 },
-      dark: { color: '#10151d', symbolColor: '#e6edf3', height: 36 },
-      lightbox: { color: '#060606', symbolColor: '#4a4a4a', height: 36 },
-    }
-    win.setTitleBarOverlay(palettes[theme] ?? palettes.light)
+    win.setTitleBarOverlay(OVERLAY_PALETTES[theme] ?? OVERLAY_PALETTES.light)
     return { ok: true }
   } catch {
     return { ok: false }

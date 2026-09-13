@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { renderMarkdown, firstText, reasoningText, formatTokens } from '../markdown.js'
 import { IconSend, IconTool, IconChevron, IconImage, IconX, IconFolder, IconHammer, IconPlan, IconDownload, IconSearch } from './Icons.jsx'
 
@@ -20,10 +20,11 @@ const StopIcon = () => (
 function Lightbox({ image, onClose }) {
   // capture the theme at mount so unmount restores exactly what was there
   const themeAtOpen = typeof document !== 'undefined' ? document.documentElement.dataset.theme : 'light'
-  useEffect(() => {
+  // layout effect: dispatch the overlay tint IPC before the dimmed overlay
+  // paints, closing the visible gap where bright native buttons glow
+  useLayoutEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
-    // blend native caption buttons into the darkened overlay
     window.dsh.setNativeTheme?.('lightbox').catch?.(() => {})
     return () => {
       document.removeEventListener('keydown', onKey)
