@@ -187,7 +187,7 @@ function CopyButton({ getText, title }) {
         } catch { /* clipboard unavailable */ }
       }}
     >
-      {done ? <IconCheck size={13} /> : <IconCopy size={13} />}
+      {done ? <IconCheck size={15} /> : <IconCopy size={15} />}
     </button>
   )
 }

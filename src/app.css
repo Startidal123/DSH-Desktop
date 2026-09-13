@@ -254,7 +254,7 @@ button {
 
 /* ---------- message timestamps ---------- */
 .msg-time {
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1307,7 +1307,7 @@ button {
   transition: color 0.12s;
 }
 .copy-btn:hover { color: var(--accent); border-color: transparent; }
-.msg-meta { margin-top: 7px; gap: 10px; opacity: 0; transition: opacity 0.15s; }
+.msg-meta { margin-top: 7px; gap: 14px; opacity: 0; transition: opacity 0.15s; align-items: center; }
 
 .note-row {
   align-self: center;
