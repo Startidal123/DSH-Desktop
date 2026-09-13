@@ -4,8 +4,7 @@
 
 ## 快速开始
 
-**方式一（免 zip）**：仓库 → client 分支 → Download ZIP → 双击 `setup.bat`
-**方式二**：`npm install && npm run dist` 本地打包。
+**方式（免 zip）**：仓库 → client 分支 → Download ZIP → 双击 `setup.bat`
 
 然后：设置 → Harness 更新 → 检查并更新（自动部署工具链 + harness + 补丁 + 构建）
 最后：配置 API 密钥（设置 → DeepSeek 官方模型密钥 / 模型下拉添加自定义端点）
