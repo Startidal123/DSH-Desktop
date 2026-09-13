@@ -3,17 +3,6 @@ import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
 import './app.css'
 
-// apply the persisted text zoom before first paint so nothing flashes.
-// Text-only scaling: a --font-scale CSS var drives html font-size; every
-// font-size in app.css is rem-based, so text grows while layout (px paddings,
-// widths, icons) stays put.
-try {
-  const savedZoom = parseFloat(localStorage.getItem('dsh-zoom'))
-  if (Number.isFinite(savedZoom) && savedZoom >= 0.7 && savedZoom <= 1.5) {
-    document.documentElement.style.setProperty('--font-scale', String(savedZoom))
-  }
-} catch { /* first boot or corrupted value */ }
-
 // A failed mount would otherwise leave only the body background; surface the
 // error on screen so packaged builds (no devtools) are diagnosable.
 try {

@@ -32,6 +32,12 @@ function Row({ label, value, accent }) {
 const TODO_LABELS = { pending: '待办', in_progress: '进行中', completed: '已完成' }
 
 export default function StatsPanel({ session }) {
+  const hasData = session && Array.isArray(session.messages) && session.messages.length > 0
+
+  // no conversation yet: collapse the whole right column instead of showing
+  // empty placeholders
+  if (!hasData) return null
+
   const usage = session?.usage ?? {
     inputTokens: 0, outputTokens: 0, cacheReadTokens: 0,
     cacheWriteTokens: 0, reasoningTokens: 0, totalTokens: 0, requests: 0,

@@ -95,6 +95,7 @@ export class DshRuntime {
     this.restarting = false
     this.flushTimer = null
     this.sessionEpoch = 0
+    this.userInterrupted = false
     this.loadSessions()
   }
 
@@ -411,11 +412,14 @@ export class DshRuntime {
     // (e.g. Volcano GLM-5.3-Flash rejects max_tokens > 131072), so its own
     // limit wins when set
     const effectiveMaxTokens = active?.maxTokens ?? this.config.maxTokens
+    // custom endpoints vary in what reasoning params they accept (some reject
+    // 'off' outright); official DeepSeek models get the full effort control
+    const effectiveEffort = active ? '' : (this.config.reasoningEffort || '')
     await this.request('initialize', {
       cwd: this.config.workspace,
       provider,
       model: this.config.model,
-      ...(this.config.reasoningEffort ? { reasoningEffort: this.config.reasoningEffort } : {}),
+      ...(effectiveEffort ? { reasoningEffort: effectiveEffort } : {}),
       ...(effectiveMaxTokens > 0 ? { maxTokens: effectiveMaxTokens } : {}),
     }, 30000)
     this.onRuntime('ready')
@@ -563,6 +567,7 @@ export class DshRuntime {
 
   async interrupt() {
     if (!this.activeId) return
+    this.userInterrupted = true
     await this.request('session/interrupt', { sessionId: this.activeId })
   }
 
@@ -664,10 +669,13 @@ export class DshRuntime {
       }
       case 'turn/end': {
         const reason = data.reason
-        if (reason?.kind === 'error') {
+        // user-initiated interrupts surface as abort/cancel errors from the
+        // LLM layer — not real failures; suppress them
+        if (reason?.kind === 'error' && !this.userInterrupted) {
           const detail = reason.error?.message ?? JSON.stringify(reason.error ?? reason).slice(0, 200)
           s.messages.push({ kind: 'note-error', note: `生成失败：${detail}`, time: event.time })
         }
+        this.userInterrupted = false
         break
       }
       case 'todo/write': {

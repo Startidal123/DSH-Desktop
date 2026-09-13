@@ -14,13 +14,6 @@ if (forceSoftwareGpu) app.disableHardwareAcceleration()
 let win = null
 let runtime = null
 
-// native caption-button palettes shared by createWindow and setNativeTheme
-const OVERLAY_PALETTES = {
-  light: { color: '#eef1f5', symbolColor: '#1f2328', height: 36 },
-  dark: { color: '#10151d', symbolColor: '#e6edf3', height: 36 },
-  lightbox: { color: '#1a1a2e', symbolColor: '#5a5a6e', height: 36 },
-}
-
 /** Client root: project dir in dev, the exe's folder when packaged — harness
  *  and workspace default to siblings of the executable for portability. */
 const appRoot = app.isPackaged ? dirname(app.getPath('exe')) : resolve(app.getAppPath())
@@ -160,12 +153,8 @@ function scheduleReconnect() {
 }
 
 function createWindow() {
-  // read the persisted theme BEFORE creating the window so background color
-  // and native caption buttons are correct from frame one — a post-creation
-  // setTitleBarOverlay call was still visibly late on some systems
   let savedTheme = 'light'
   try { savedTheme = loadSettings().config?.theme ?? 'light' } catch { /* defaults */ }
-  const savedPalette = OVERLAY_PALETTES[savedTheme] ?? OVERLAY_PALETTES.light
 
   const devIcon = join(appRoot, 'build', 'icon.ico')
   win = new BrowserWindow({
@@ -176,8 +165,11 @@ function createWindow() {
     backgroundColor: savedTheme === 'light' ? '#f6f8fa' : '#0d1117',
     title: 'DeepSeek Harness',
     autoHideMenuBar: true,
+    // hidden titlebar WITHOUT overlay = no native caption buttons at all;
+    // the window frame (shadow, resize borders) stays. We draw our own HTML
+    // buttons in the titlebar — native ones proved uncontrollable on some
+    // systems (stuck dark regardless of titleBarOverlay/nativeTheme).
     titleBarStyle: 'hidden',
-    titleBarOverlay: savedPalette,
     ...(existsSync(devIcon) ? { icon: devIcon } : {}),
     webPreferences: {
       preload: resolve(import.meta.dirname, 'preload.mjs'),
@@ -223,10 +215,13 @@ function createWindow() {
       mkdirSync(app.getPath('userData'), { recursive: true })
       const installed = readFileSync(join(app.getAppPath(), '.installed-commit'), 'utf8').trim()
       writeFileSync(join(app.getPath('userData'), 'client-boot-ok'), installed)
-      // the attempt recorded by loader.mjs is settled: this boot made it
       rmSync(join(app.getPath('userData'), 'client-boot-attempt'), { force: true })
     } catch { /* best effort */ }
   })
+
+  // forward maximize state so the HTML titlebar can swap ─/□ icons
+  win.on('maximize', () => send('dsh:win-maximized', true))
+  win.on('unmaximize', () => send('dsh:win-maximized', false))
   // warm the runtime up in the background so the first prompt is instant
   const rt = ensureRuntime()
   rt.ensureStarted().catch(() => { /* surfaced via prompt errors */ })
@@ -496,17 +491,16 @@ ipcMain.handle('dsh:openConfigFolder', () => {
   return { ok: true }
 })
 
-ipcMain.handle('dsh:setNativeTheme', (_e, theme) => {
-  // the window-caption buttons are native and outside CSS reach; retint them
-  // to match the in-app palette. 'lightbox' uses near-black with dim symbols
-  // so the buttons recede into the dimmed overlay instead of glowing.
+ipcMain.handle('dsh:winControl', (_e, action) => {
   if (!win || win.isDestroyed()) return { ok: false }
-  try {
-    win.setTitleBarOverlay(OVERLAY_PALETTES[theme] ?? OVERLAY_PALETTES.light)
-    return { ok: true }
-  } catch {
-    return { ok: false }
-  }
+  if (action === 'minimize') win.minimize()
+  else if (action === 'maximize') win.isMaximized() ? win.unmaximize() : win.maximize()
+  else if (action === 'close') win.close()
+  return { ok: true, maximized: win.isMaximized() }
+})
+
+ipcMain.handle('dsh:winIsMaximized', () => {
+  return win && !win.isDestroyed() ? win.isMaximized() : false
 })
 
 // ---------- Explorer context-menu integration ----------

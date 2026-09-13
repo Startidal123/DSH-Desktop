@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { renderMarkdown, firstText, reasoningText, formatTokens } from '../markdown.js'
-import { IconSend, IconTool, IconChevron, IconImage, IconX, IconFolder, IconHammer, IconPlan, IconDownload, IconSearch } from './Icons.jsx'
+import { IconSend, IconTool, IconChevron, IconImage, IconX, IconFolder, IconHammer, IconPlan, IconDownload, IconSearch, IconCopy, IconCheck } from './Icons.jsx'
 
 /** Timestamp for messages: HH:mm today, M/D HH:mm otherwise */
 function fmtMsgTime(t) {
@@ -12,7 +12,7 @@ function fmtMsgTime(t) {
 }
 
 const StopIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="stop-icon" aria-hidden>
     <rect x="6" y="6" width="12" height="12" rx="2.5" />
   </svg>
 )
@@ -20,15 +20,11 @@ const StopIcon = () => (
 function Lightbox({ image, onClose }) {
   // capture the theme at mount so unmount restores exactly what was there
   const themeAtOpen = typeof document !== 'undefined' ? document.documentElement.dataset.theme : 'light'
-  // layout effect: dispatch the overlay tint IPC before the dimmed overlay
-  // paints, closing the visible gap where bright native buttons glow
   useLayoutEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
-    window.dsh.setNativeTheme?.('lightbox').catch?.(() => {})
     return () => {
       document.removeEventListener('keydown', onKey)
-      window.dsh.setNativeTheme?.(themeAtOpen).catch?.(() => {})
     }
   }, [])
   if (!image) return null
@@ -191,8 +187,33 @@ function CopyButton({ getText, title }) {
         } catch { /* clipboard unavailable */ }
       }}
     >
-      {done ? '已复制' : '复制'}
+      {done ? <IconCheck size={13} /> : <IconCopy size={13} />}
     </button>
+  )
+}
+
+const COLLAPSE_THRESHOLD = 600
+
+function CollapsibleText({ html }) {
+  const [collapsed, setCollapsed] = useState(false)
+  const [overflow, setOverflow] = useState(false)
+  const bodyRef = useRef(null)
+  useEffect(() => {
+    const el = bodyRef.current
+    if (el) setOverflow(el.scrollHeight > COLLAPSE_THRESHOLD)
+  }, [html])
+  if (!overflow) return <div className="markdown-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: html }} />
+  return (
+    <div className="collapse-wrap">
+      <div
+        className={`markdown-body collapse-target ${collapsed ? 'collapsed' : ''}`}
+        ref={bodyRef}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+      <button className="collapse-btn" onClick={() => setCollapsed(c => !c)}>
+        {collapsed ? '展开全文' : '收起'}
+      </button>
+    </div>
   )
 }
 
@@ -204,7 +225,7 @@ function AssistantMessage({ msg, onImageClick, idx, hit, current }) {
     <div className={cls} id={`msg-${idx}`}>
       <ReasoningBlock text={reasoning} />
       {html
-        ? <div className="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
+        ? <CollapsibleText html={html} />
         : <div className="bubble placeholder">{msg.interrupted ? '（回复被中断）' : '（无文本输出）'}</div>}
       <div className="msg-meta">
         <span className="msg-time">{fmtMsgTime(msg.time)}</span>
@@ -271,8 +292,7 @@ function Message({ msg, onImageClick, idx, hit, current }) {
       </div>
     )
   }
-  if (msg.kind === 'assistant') {
-    return <AssistantMessage msg={msg} idx={idx} hit={hit} current={current} />
+  if (msg.kind === 'assistant') {    return <AssistantMessage msg={msg} idx={idx} hit={hit} current={current} />
   }
   return null
 }
@@ -442,37 +462,42 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
     window.dsh.interrupt().catch(() => {})
   }
 
+  // welcome mode: no messages yet → centered hero + input, no chat header
+  const hasData = session && Array.isArray(session.messages) && session.messages.length > 0
+
   return (
-    <section className="chat">
-      <header className="chat-head">
-        <div className="chat-head-info">
-          <div className="chat-title">{session?.title || '新对话'}</div>
-          <div className="chat-meta-line">
-            <span className={`meta-dot ${badge}`} />
-            <span className="meta-state">
-              {badge === 'running' ? '工作中' : badge === 'ready' ? '就绪' : badge === 'starting' ? '启动中' : '未连接'}
-            </span>
-            {messageCount > 0 && (
-              <>
-                <span className="meta-sep">·</span>
-                <span>{messageCount} 条消息</span>
-              </>
-            )}
-            <span className="meta-sep">·</span>
-            <span className="meta-model">{modelLabel}</span>
+    <section className={`chat ${hasData ? '' : 'welcome-mode'}`}>
+      {hasData && (
+        <header className="chat-head">
+          <div className="chat-head-info">
+            <div className="chat-title">{session?.title || '新对话'}</div>
+            <div className="chat-meta-line">
+              <span className={`meta-dot ${badge}`} />
+              <span className="meta-state">
+                {badge === 'running' ? '工作中' : badge === 'ready' ? '就绪' : badge === 'starting' ? '启动中' : '未连接'}
+              </span>
+              {messageCount > 0 && (
+                <>
+                  <span className="meta-sep">·</span>
+                  <span>{messageCount} 条消息</span>
+                </>
+              )}
+              <span className="meta-sep">·</span>
+              <span className="meta-model">{modelLabel}</span>
+            </div>
           </div>
-        </div>
-        <ModelDropdown
-          provider={config.provider}
-          model={config.model}
-          activeCustom={config.activeCustom}
-          running={running}
-          runtimeStatus={runtimeStatus}
-          customModels={config.customModels}
-          onSwitch={onSwitchModel}
-          onChanged={onConfigChanged}
-        />
-      </header>
+          <ModelDropdown
+            provider={config.provider}
+            model={config.model}
+            activeCustom={config.activeCustom}
+            running={running}
+            runtimeStatus={runtimeStatus}
+            customModels={config.customModels}
+            onSwitch={onSwitchModel}
+            onChanged={onConfigChanged}
+          />
+        </header>
+      )}
 
       {findOpen && (
         <div className="find-bar">
@@ -497,11 +522,12 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
       )}
 
       <div className="message-list" ref={listRef}>
-        {!session || session.messages.length === 0 ? (
+        {!hasData ? (
           <div className="welcome">
-            <div className="welcome-whale"><WhaleMark size={64} /></div>
-            <div className="welcome-title">探索未知之境</div>
-            <div className="welcome-badge">预览版</div>
+            <div className="welcome-brand">
+              <WhaleMark size={64} />
+              <span className="welcome-title">探索未知之境</span>
+            </div>
           </div>
         ) : (
           session.messages.map((m, i) => (
@@ -551,8 +577,7 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
             {Array.from({ length: 12 }, (_, i) => <span key={i} className="work-dot" />)}
           </div>
         )}
-        <div className="composer-row">
-          <div className={`input-card mode-${mode}`}>
+        <div className={`input-card mode-${mode}`}>
           {images.length > 0 && (
             <div className="image-preview-row">
               {images.map((img, i) => (
@@ -604,6 +629,18 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
           />
           <div className="input-card-foot">
             <div className="input-foot-left">
+              {!hasData && (
+                <ModelDropdown
+                  provider={config.provider}
+                  model={config.model}
+                  activeCustom={config.activeCustom}
+                  running={running}
+                  runtimeStatus={runtimeStatus}
+                  customModels={config.customModels}
+                  onSwitch={onSwitchModel}
+                  onChanged={onConfigChanged}
+                />
+              )}
               <button
                 className={`mode-toggle ${mode}`}
                 title={mode === 'build' ? '构建模式：可读写与执行（点击切换为计划模式）' : '计划模式：只读调研，输出计划不执行（点击切换为构建模式）'}
@@ -629,11 +666,20 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
                 <IconFolder size={13} />
                 <span className="workspace-path">{config.workspace}</span>
               </button>
-              <span className="input-hint">Enter 发送 · Shift+Enter 换行{images.length > 0 ? ` · ${images.length} 张图片` : ''}</span>
             </div>
-            {!config.activeCustom && (
-              <EffortControl effort={effort} locked={effortLocked} onCommit={onSwitchEffort} />
-            )}
+            <div className="input-foot-right">
+              {!config.activeCustom && (
+                <EffortControl effort={effort} locked={effortLocked} onCommit={onSwitchEffort} />
+              )}
+              <button
+                className={`send-btn ${running ? 'stopping' : ''}`}
+                onClick={() => (running ? stop() : submit())}
+                disabled={(!text.trim() && images.length === 0 && !running) || sending}
+                title={running ? '停止生成' : '发送'}
+              >
+                {running ? <StopIcon /> : <IconSend size={19} />}
+              </button>
+            </div>
           </div>
           <input
             ref={fileRef}
@@ -647,15 +693,8 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
             }}
           />
         </div>
-        <button
-          className={`send-btn ${running ? 'stopping' : ''}`}
-          onClick={() => (running ? stop() : submit())}
-          disabled={(!text.trim() && images.length === 0 && !running) || sending}
-          title={running ? '停止生成' : '发送'}
-        >
-          {running ? <StopIcon /> : <IconSend size={22} />}
-          <span className="send-text">{running ? '停止' : '发送'}</span>
-        </button>
+        <div className="composer-hint">
+          Enter 发送 · Shift+Enter 换行 · Tab 切换模式{images.length > 0 ? ` · ${images.length} 张图片` : ''}
         </div>
       </footer>
       <Lightbox image={lightbox} onClose={() => setLightbox(null)} />

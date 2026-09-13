@@ -26,44 +26,19 @@ export default function App() {
   const [harnessLines, setHarnessLines] = useState([])
   const [clientLines, setClientLines] = useState([])
   const [updateBadge, setUpdateBadge] = useState(false)
-  const [zoom, setZoomState] = useState(() => {
-    const v = parseFloat(localStorage.getItem('dsh-zoom'))
-    return Number.isFinite(v) && v >= 0.7 && v <= 1.5 ? v : 1
-  })
+  const [maximized, setMaximized] = useState(false)
+  const [statsOpen, setStatsOpen] = useState(() => localStorage.getItem('dsh-stats-open') !== 'false')
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('dsh-theme', theme)
-    window.dsh.setNativeTheme?.(theme).catch?.(() => {})
-    // persist to settings.json too so the main process can sync the native
-    // caption buttons at window creation (no first-frame flash)
     window.dsh.updateConfig?.({ theme }).catch?.(() => {})
   }, [theme])
 
-  const applyZoom = useCallback((next) => {
-    const v = Math.min(1.5, Math.max(0.7, Math.round(next * 20) / 20))
-    setZoomState(v)
-    localStorage.setItem('dsh-zoom', String(v))
-    document.documentElement.style.setProperty('--font-scale', String(v))
-  }, [])
-
   useEffect(() => {
-    const onKey = (e) => {
-      const mod = e.ctrlKey || e.metaKey
-      if (!mod) return
-      if (e.key === '=' || e.key === '+') { e.preventDefault(); applyZoom(zoom + 0.1) }
-      else if (e.key === '-') { e.preventDefault(); applyZoom(zoom - 0.1) }
-      else if (e.key === '0') { e.preventDefault(); applyZoom(1) }
-    }
-    const onWheel = (e) => {
-      if (!(e.ctrlKey || e.metaKey)) return
-      e.preventDefault()
-      applyZoom(zoom + (e.deltaY < 0 ? 0.1 : -0.1))
-    }
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('wheel', onWheel, { passive: false })
-    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('wheel', onWheel) }
-  }, [zoom, applyZoom])
+    window.dsh.winIsMaximized().then(setMaximized).catch(() => {})
+    return window.dsh.onMaximized(setMaximized)
+  }, [])
 
   useEffect(() => {
     const offSnapshot = window.dsh.onSnapshot(s => setState(s))
@@ -124,6 +99,13 @@ export default function App() {
       } catch { /* renderer tearing down */ }
     }, 5000)
     return () => { offSnapshot(); offRuntime(); offHarness(); offClient(); clearInterval(statusTimer) }
+  }, [])
+
+  const toggleStats = useCallback(() => {
+    setStatsOpen(prev => {
+      localStorage.setItem('dsh-stats-open', String(!prev))
+      return !prev
+    })
   }, [])
 
   const refreshConfig = useCallback(async () => {
@@ -191,8 +173,28 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <div className="titlebar" />
-      <div className="layout">
+      <div className="titlebar">
+        <div className="titlebar-drag" onDoubleClick={() => window.dsh.winControl('maximize')} />
+        <div className="titlebar-controls">
+          <button className="win-btn" onClick={() => window.dsh.winControl('minimize')} title="最小化">
+            <svg width="10" height="10" viewBox="0 0 10 10"><rect x="1" y="4.5" width="8" height="1" fill="currentColor" /></svg>
+          </button>
+          <button className="win-btn" onClick={() => window.dsh.winControl('maximize')} title={maximized ? '还原' : '最大化'}>
+            {maximized ? (
+              <svg width="10" height="10" viewBox="0 0 10 10">
+                <rect x="0.5" y="2.5" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1" />
+                <rect x="2.5" y="0.5" width="7" height="7" fill="var(--bg-panel)" stroke="currentColor" strokeWidth="1" />
+              </svg>
+            ) : (
+              <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1" /></svg>
+            )}
+          </button>
+          <button className="win-btn win-close" onClick={() => window.dsh.winControl('close')} title="关闭">
+            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0.5 0.5 9.5 9.5M9.5 0.5 0.5 9.5" stroke="currentColor" strokeWidth="1" fill="none" /></svg>
+          </button>
+        </div>
+      </div>
+      <div className={`layout ${state.active?.messages?.length && statsOpen ? '' : 'no-stats'}`}>
       <Sidebar
         sessions={state.sessions}
         activeId={state.activeId}
@@ -225,15 +227,33 @@ export default function App() {
         onSwitchWorkspace={switchWorkspace}
         onSend={send}
       />
-      <StatsPanel session={state.active} />
+      {state.active?.messages?.length > 0 && statsOpen && <StatsPanel session={state.active} />}
+      {state.active?.messages?.length > 0 && (
+        <div
+          className="stats-edge"
+          style={{ right: statsOpen ? 'var(--stats-w)' : '0' }}
+        >
+          <button className="stats-toggle" onClick={toggleStats} title={statsOpen ? '隐藏统计栏' : '显示统计栏'}>
+            {statsOpen ? (
+              <svg width="14" height="16" viewBox="0 0 12 16" fill="none" stroke="currentColor"
+                strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 2l4 6-4 6" />
+              </svg>
+            ) : (
+              <svg width="14" height="16" viewBox="0 0 12 16" fill="none" stroke="currentColor"
+                strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 2 4 8l4 6" />
+              </svg>
+            )}
+          </button>
+        </div>
+      )}
       {showSettings && (
         <SettingsModal
           config={config}
           hasApiKey={hasApiKey}
           harnessLines={harnessLines}
           clientLines={clientLines}
-          zoom={zoom}
-          onZoom={applyZoom}
           onClose={() => setShowSettings(false)}
           onSave={saveConfig}
           onPickWorkspace={() => window.dsh.pickWorkspace()}

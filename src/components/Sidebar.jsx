@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { IconPlus, IconSettings, IconTrash, IconRefresh, IconSearch, IconX, IconFolder, IconChevron } from './Icons.jsx'
+import { IconPlus, IconSettings, IconRefresh, IconSearch, IconX, IconFolder, IconFolderOpen } from './Icons.jsx'
 import { renderMarkdown } from '../markdown.js'
 import { WhaleMark } from './WhaleMark.jsx'
 
@@ -201,13 +201,13 @@ export default function Sidebar({ sessions, activeId, config, onSelect, onNew, o
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
-        <span className="brand-whale"><WhaleMark size={36} /></span>
+        <span className="brand-whale"><WhaleMark size={40} /></span>
         <span className="brand-name">DeepSeek</span>
         <span className="brand-tag">HARNESS</span>
       </div>
 
       <button className="new-chat" onClick={onNew}>
-        <IconPlus />
+        <IconPlus size={15} />
         <span>新对话</span>
       </button>
 
@@ -215,7 +215,7 @@ export default function Sidebar({ sessions, activeId, config, onSelect, onNew, o
         <div className="session-top-spacer" />
         <ChangePlanCard />
         <div className="history-head">
-          <span className="history-title">{q ? '' : '历史对话'}</span>
+          <span className="history-title">{q ? '' : '工作区'}</span>
           {searchOpen ? (
             <div className="history-search">
               <IconSearch size={13} />
@@ -244,9 +244,14 @@ export default function Sidebar({ sessions, activeId, config, onSelect, onNew, o
               {g.flat ? (
                 <div className="ws-group-head static"><span className="ws-name">{g.label}</span></div>
               ) : (
-                <div className="ws-group-head" onClick={() => toggleCollapse(g.key)} title={g.key}>
-                  <IconChevron size={12} className={`ws-chevron ${collapsed.has(g.key) ? '' : 'open'}`} />
-                  <IconFolder size={13} />
+                <div
+                  className={`ws-group-head ${collapsed.has(g.key) ? '' : 'ws-open'}`}
+                  onClick={() => toggleCollapse(g.key)}
+                  title={g.key}
+                >
+                  {collapsed.has(g.key)
+                    ? <IconFolder size={16} />
+                    : <IconFolderOpen size={16} />}
                   <span className="ws-name">{g.label}</span>
                   <span className="ws-count">{g.sessions.length}</span>
                 </div>

@@ -149,7 +149,7 @@ function ContextMenuToggle() {
   )
 }
 
-export default function SettingsModal({ config, hasApiKey, harnessLines, clientLines, zoom, onZoom, onClose, onSave, onPickWorkspace }) {
+export default function SettingsModal({ config, hasApiKey, harnessLines, clientLines, onClose, onSave, onPickWorkspace }) {
   const [tab, setTab] = useState('general')
   const [saving, setSaving] = useState(false)
   const [workspace, setWorkspace] = useState(config.workspace ?? '')
@@ -224,17 +224,6 @@ export default function SettingsModal({ config, hasApiKey, harnessLines, clientL
                     </button>
                   </div>
                   <div className="field-hint">默认为客户端目录下 harness；不存在时由「更新」页自动克隆部署</div>
-                </div>
-
-                <div className="field">
-                  <span>界面缩放</span>
-                  <div className="zoom-row">
-                    <button className="zoom-btn" onClick={() => onZoom(zoom - 0.1)} title="缩小">−</button>
-                    <span className="zoom-value">{Math.round(zoom * 100)}%</span>
-                    <button className="zoom-btn" onClick={() => onZoom(zoom + 0.1)} title="放大">＋</button>
-                    <button className="zoom-reset" onClick={() => onZoom(1)}>复位</button>
-                  </div>
-                  <div className="field-hint">Ctrl + 滚轮 / Ctrl + = / Ctrl + − 也可调节，Ctrl + 0 复位</div>
                 </div>
               </>
             )}
