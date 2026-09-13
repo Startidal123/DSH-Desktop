@@ -78,5 +78,3 @@ npm run dist       # 打 zip 分发版（含 exe）
 - **杀毒报警**：未签名 exe 的正常误报，将客户端文件夹加入信任区
 
 MIT License
-
-test change
