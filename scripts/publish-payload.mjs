@@ -133,8 +133,14 @@ for (const file of PAYLOAD_FILES) {
   if (existsSync(join(root, file))) cpSync(join(root, file), join(appDir, file))
 }
 writeFileSync(join(appDir, '.installed-commit'), 'client-branch-bootstrap\n')
-// bootstrap pieces at the branch root
-writeFileSync(join(tmp, 'setup.bat'), setupBat)
+// bootstrap pieces at the branch root; setup.bat must be GBK-encoded — cmd.exe
+// parses batch files in the ANSI codepage, and UTF-8 Chinese desyncs its parser
+writeFileSync(join(tmp, 'setup.bat.utf8'), setupBat)
+execSync(
+  `powershell -NoProfile -Command "$c = Get-Content -Raw -Encoding UTF8 'setup.bat.utf8'; [System.IO.File]::WriteAllText('setup.bat', $c, [System.Text.Encoding]::GetEncoding(936))"`,
+  { cwd: tmp, windowsHide: true, stdio: 'pipe' },
+)
+rmSync(join(tmp, 'setup.bat.utf8'), { force: true })
 writeFileSync(join(tmp, '.gitattributes'), '* -text\n')
 if (existsSync(join(root, 'vendor', 'rcedit-x64.exe'))) cpSync(join(root, 'vendor', 'rcedit-x64.exe'), join(tmp, 'rcedit-x64.exe'))
 if (existsSync(join(root, 'build', 'icon.ico'))) cpSync(join(root, 'build', 'icon.ico'), join(tmp, 'icon.ico'))
