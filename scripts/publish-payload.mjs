@@ -2,10 +2,15 @@
 //   main   — source + payload (clients self-update from this branch)
 //   client — bootstrap branch: tiny zip (~3MB) + setup.bat that fetches the
 //            Electron runtime from npmmirror, so fresh machines install with
-//            zero prerequisites and zero manual zip copying (GitHub's 100MB
-//            file limit forbids committing the 189MB exe itself).
+//            zero prerequisites (GitHub's 100MB file limit forbids committing
+//            the 189MB exe itself).
+//
+// Idempotency: a content hash over the shipped payload keeps the branches
+// quiet — running publish with no real change writes nothing and pushes
+// nothing, so GitHub never shows spurious "branch updated" noise.
 import { execSync } from 'node:child_process'
-import { writeFileSync, existsSync, mkdirSync, rmSync, cpSync, readFileSync } from 'node:fs'
+import { writeFileSync, existsSync, mkdirSync, rmSync, cpSync, readFileSync, readdirSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 
 const root = process.cwd()
@@ -36,6 +41,44 @@ function pushWithRetry(cwd, spec, label) {
   return false
 }
 
+// ---------- content hashing (publish idempotency) ----------
+function hashDir(h, dir, prefix) {
+  if (!existsSync(dir)) return
+  const entries = readdirSync(dir, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name))
+  for (const e of entries) {
+    const full = join(dir, e.name)
+    const rel = `${prefix}/${e.name}`
+    if (e.isDirectory()) hashDir(h, full, rel)
+    else {
+      h.update(rel)
+      h.update(readFileSync(full))
+    }
+  }
+}
+
+/** md5 over everything the branches ship: payload parts + bootstrap pieces. */
+function computeContentHash(setupBat, installNote, electronVersion) {
+  const h = createHash('md5')
+  for (const part of PAYLOAD_PARTS) hashDir(h, join(root, part), part)
+  for (const f of ['package.json', 'README.md']) {
+    if (existsSync(join(root, f))) {
+      h.update(f)
+      h.update(readFileSync(join(root, f)))
+    }
+  }
+  h.update(`electron:${electronVersion}`)
+  h.update(`setup:${setupBat}`)
+  h.update(`note:${installNote}`)
+  for (const f of ['vendor/rcedit-x64.exe', 'build/icon.ico']) {
+    if (existsSync(join(root, f))) {
+      h.update(f)
+      h.update(readFileSync(join(root, f)))
+    }
+  }
+  return h.digest('hex')
+}
+
 // ---------- 0. repo must exist ----------
 if (!existsSync(join(root, '.git'))) {
   console.log('初始化源码仓库…')
@@ -58,27 +101,9 @@ const originUrl = originOverride || remote
 // ---------- 1. build ----------
 console.log('1/4 构建前端…')
 execSync('npx vite build', { cwd: root, windowsHide: true, stdio: 'inherit' })
-writeFileSync(join(root, 'version.json'), JSON.stringify({ builtAt: new Date().toISOString() }, null, 2) + '\n')
 writeFileSync(join(root, '.gitattributes'), '* -text\n')
 
-// ---------- 2. commit + push main ----------
-console.log('2/4 发布 main 分支（源码 + payload）…')
-git('add -A')
-const changed = (() => {
-  try { execSync('git diff --cached --quiet', { cwd: root, windowsHide: true, stdio: 'ignore' }); return false } catch { return true }
-})()
-if (!changed) {
-  console.log('main 无变化，跳过提交')
-} else {
-  git('commit -m "release: payload build"')
-  pushWithRetry(root, '-u origin main', 'main')
-}
-
-// ---------- 3. assemble client bootstrap branch ----------
-console.log('3/4 组装 client 引导分支…')
 const electronVersion = JSON.parse(readFileSync(join(root, 'node_modules', 'electron', 'package.json'), 'utf8')).version
-const tmp = join(root, '.client-branch-tmp')
-rmSync(tmp, { recursive: true, force: true })
 
 const setupBat = `@echo off
 setlocal
@@ -137,6 +162,38 @@ echo 首次使用请在 设置 - Harness 更新 中点「检查并更新」完�
 pause
 `
 
+const installNote = '新机器安装：直接双击 setup.bat（需联网，自动下载运行时）。\n装好后启动 DSH Client.exe，在 设置 → Harness 更新 点「检查并更新」部署 harness。\n\n已装过客户端的机器无需本分支：应用会从 main 分支自动热更新。\n'
+
+// version.json only bumps when the shipped content actually changed — an
+// unconditional builtAt would create a commit (and a client force-push, and a
+// GitHub notification) on every run even with zero changes
+const contentHash = computeContentHash(setupBat, installNote, electronVersion)
+let prevVersion = null
+try { prevVersion = JSON.parse(readFileSync(join(root, 'version.json'), 'utf8')) } catch { /* absent */ }
+if (!prevVersion || prevVersion.contentHash !== contentHash) {
+  writeFileSync(join(root, 'version.json'), JSON.stringify({ builtAt: new Date().toISOString(), contentHash }, null, 2) + '\n')
+  console.log('payload 内容有变化，version.json 已刷新')
+} else {
+  console.log('payload 内容无变化，保持 version.json')
+}
+
+// ---------- 2. commit + push main ----------
+console.log('2/4 发布 main 分支（源码 + payload）…')
+git('add -A')
+const changed = (() => {
+  try { execSync('git diff --cached --quiet', { cwd: root, windowsHide: true, stdio: 'ignore' }); return false } catch { return true }
+})()
+if (!changed) {
+  console.log('main 无变化，跳过提交')
+} else {
+  git('commit -m "release: payload build"')
+  pushWithRetry(root, '-u origin main', 'main')
+}
+
+// ---------- 3. assemble client bootstrap branch ----------
+console.log('3/4 组装 client 引导分支…')
+const tmp = join(root, '.client-branch-tmp')
+rmSync(tmp, { recursive: true, force: true })
 mkdirSync(tmp, { recursive: true })
 // payload under resources/app
 const appDir = join(tmp, 'resources', 'app')
@@ -148,7 +205,7 @@ for (const file of PAYLOAD_FILES) {
 writeFileSync(join(appDir, '.installed-commit'), 'client-branch-bootstrap\n')
 // bootstrap pieces at the branch root; setup.bat must be GBK-encoded AND
 // CRLF-terminated — cmd.exe's parser (parenthesized blocks especially)
-// desyncs on LF-only batch files
+// desyncs on LF-only batch files, and UTF-8 Chinese desyncs its codepage
 writeFileSync(join(tmp, 'setup.bat.utf8'), setupBat.replace(/\r?\n/g, '\r\n'))
 execSync(
   `powershell -NoProfile -Command "$c = Get-Content -Raw -Encoding UTF8 'setup.bat.utf8'; [System.IO.File]::WriteAllText('setup.bat', $c, [System.Text.Encoding]::GetEncoding(936))"`,
@@ -158,19 +215,31 @@ rmSync(join(tmp, 'setup.bat.utf8'), { force: true })
 writeFileSync(join(tmp, '.gitattributes'), '* -text\n')
 if (existsSync(join(root, 'vendor', 'rcedit-x64.exe'))) cpSync(join(root, 'vendor', 'rcedit-x64.exe'), join(tmp, 'rcedit-x64.exe'))
 if (existsSync(join(root, 'build', 'icon.ico'))) cpSync(join(root, 'build', 'icon.ico'), join(tmp, 'icon.ico'))
-// README pointer so the branch zip is self-explanatory
-writeFileSync(join(tmp, '安装说明.txt'), '新机器安装：直接双击 setup.bat（需联网，自动下载运行时）。\n装好后启动 DSH Client.exe，在 设置 → Harness 更新 点「检查并更新」部署 harness。\n\n已装过客户端的机器无需本分支：应用会从 main 分支自动热更新。\n')
+writeFileSync(join(tmp, '安装说明.txt'), installNote)
 
-// ---------- 4. push client branch (independent one-commit repo) ----------
+// ---------- 4. push client branch, but only when content really changed ----------
 console.log('4/4 发布 client 引导分支…')
 execSync('git init -q -b client', { cwd: tmp, windowsHide: true })
 execSync('git add -A', { cwd: tmp, windowsHide: true })
 execSync(`git -c user.email=publish@dsh.client -c user.name=dsh-publish commit -q -m "client bootstrap (electron ${electronVersion})"`, { cwd: tmp, windowsHide: true })
 execSync(`git remote add origin "${originUrl}"`, { cwd: tmp, windowsHide: true })
-const okClient = pushWithRetry(tmp, '-f origin client', 'client')
+
+let remoteHash = null
+try {
+  execSync('git fetch -q origin client', { cwd: tmp, windowsHide: true, stdio: 'pipe' })
+  const v = execSync('git show FETCH_HEAD:resources/app/version.json', { cwd: tmp, windowsHide: true, stdio: 'pipe' }).toString()
+  remoteHash = JSON.parse(v).contentHash ?? null
+} catch { /* no remote client branch yet */ }
+
+let clientPushed = false
+if (remoteHash === contentHash) {
+  console.log('client 分支内容与远端一致，跳过推送（不产生更新提示）')
+} else {
+  clientPushed = pushWithRetry(tmp, '-f origin client', 'client')
+}
 rmSync(tmp, { recursive: true, force: true })
-if (!okClient) process.exit(1)
+
 console.log('')
 console.log('发布完成：')
-console.log('  main   ← 源码 + payload（已装客户端的机器自动更新）')
-console.log('  client ← 引导安装（新机器：仓库切到 client 分支 → Download ZIP → 双击 setup.bat）')
+console.log(changed ? '  main   ← 已更新（源码 + payload）' : '  main   ← 无变化')
+console.log(clientPushed ? '  client ← 已更新（新机器引导包）' : (remoteHash === contentHash ? '  client ← 无变化' : '  client ← 推送失败（稍后重跑 publish 即可）'))
