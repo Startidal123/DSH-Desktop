@@ -474,12 +474,16 @@ ipcMain.handle('dsh:openConfigFolder', () => {
 
 ipcMain.handle('dsh:setNativeTheme', (_e, theme) => {
   // the window-caption buttons are native and outside CSS reach; retint them
-  // to match the in-app theme palette
+  // to match the in-app palette. 'lightbox' uses near-black with dim symbols
+  // so the buttons recede into the dimmed overlay instead of glowing.
   if (!win || win.isDestroyed()) return { ok: false }
   try {
-    win.setTitleBarOverlay(theme === 'light'
-      ? { color: '#eef1f5', symbolColor: '#1f2328', height: 36 }
-      : { color: '#10151d', symbolColor: '#e6edf3', height: 36 })
+    const palettes = {
+      light: { color: '#eef1f5', symbolColor: '#1f2328', height: 36 },
+      dark: { color: '#10151d', symbolColor: '#e6edf3', height: 36 },
+      lightbox: { color: '#060606', symbolColor: '#4a4a4a', height: 36 },
+    }
+    win.setTitleBarOverlay(palettes[theme] ?? palettes.light)
     return { ok: true }
   } catch {
     return { ok: false }

@@ -3,7 +3,6 @@ import Sidebar from './components/Sidebar.jsx'
 import ChatPanel from './components/ChatPanel.jsx'
 import StatsPanel from './components/StatsPanel.jsx'
 import SettingsModal from './components/SettingsModal.jsx'
-import { WhaleMark } from './components/WhaleMark.jsx'
 
 const initial = {
   sessions: [],
@@ -182,14 +181,12 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <div className="titlebar">
-        <span className="titlebar-whale"><WhaleMark size={15} /></span>
-        <span className="titlebar-name">DeepSeek Harness</span>
-      </div>
+      <div className="titlebar" />
       <div className="layout">
       <Sidebar
         sessions={state.sessions}
         activeId={state.activeId}
+        config={config}
         runtimeStatus={runtimeStatus}
         onSelect={id => window.dsh.selectSession(id)}
         onNew={() => window.dsh.newSession()}

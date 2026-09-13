@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { renderMarkdown, firstText, reasoningText, formatTokens } from '../markdown.js'
-import { IconSend, IconTool, IconChevron, IconImage, IconX, IconFolder, IconHammer, IconPlan, IconDownload } from './Icons.jsx'
+import { IconSend, IconTool, IconChevron, IconImage, IconX, IconFolder, IconHammer, IconPlan, IconDownload, IconSearch } from './Icons.jsx'
+
+/** Timestamp for messages: HH:mm today, M/D HH:mm otherwise */
+function fmtMsgTime(t) {
+  if (!t) return ''
+  const d = new Date(t)
+  const sameDay = d.toDateString() === new Date().toDateString()
+  const hm = d.toTimeString().slice(0, 5)
+  return sameDay ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`
+}
 
 const StopIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -9,11 +18,18 @@ const StopIcon = () => (
 )
 
 function Lightbox({ image, onClose }) {
+  // capture the theme at mount so unmount restores exactly what was there
+  const themeAtOpen = typeof document !== 'undefined' ? document.documentElement.dataset.theme : 'light'
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
+    // blend native caption buttons into the darkened overlay
+    window.dsh.setNativeTheme?.('lightbox').catch?.(() => {})
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      window.dsh.setNativeTheme?.(themeAtOpen).catch?.(() => {})
+    }
+  }, [])
   if (!image) return null
 
   const save = async () => {
@@ -26,13 +42,15 @@ function Lightbox({ image, onClose }) {
 
   return (
     <div className="lightbox" onClick={onClose}>
-      <img src={image.src} alt="查看图片" onClick={e => e.stopPropagation()} />
-      <button className="lightbox-save" title="保存到本地" onClick={e => { e.stopPropagation(); save() }}>
-        <IconDownload size={17} />
-      </button>
-      <button className="lightbox-close" onClick={onClose}>
-        <IconX size={16} />
-      </button>
+      <div className="lightbox-frame" onClick={e => e.stopPropagation()}>
+        <img src={image.src} alt="查看图片" />
+        <button className="lightbox-save" title="保存到本地" onClick={save}>
+          <IconDownload size={17} />
+        </button>
+        <button className="lightbox-close" title="关闭" onClick={onClose}>
+          <IconX size={16} />
+        </button>
+      </div>
     </div>
   )
 }
@@ -112,11 +130,14 @@ function resultText(blocks) {
   return text.length > 400 ? text.slice(0, 399) + '…' : text
 }
 
-function ToolCard({ msg }) {
+function ToolCard({ msg, hit, current, idx }) {
   const [open, setOpen] = useState(false)
   const running = msg.status === 'running'
   return (
-    <div className={`tool-card ${running ? 'running' : ''} ${msg.isError ? 'error' : ''}`}>
+    <div
+      className={`tool-card ${running ? 'running' : ''} ${msg.isError ? 'error' : ''} ${hit ? 'search-hit' : ''} ${current ? 'search-current' : ''}`}
+      id={`msg-${idx}`}
+    >
       <button className="tool-head" onClick={() => setOpen(!open)}>
         {running
           ? <span className="spinner tiny" />
@@ -174,16 +195,18 @@ function CopyButton({ getText, title }) {
   )
 }
 
-function AssistantMessage({ msg, onImageClick }) {
+function AssistantMessage({ msg, onImageClick, idx, hit, current }) {
   const reasoning = reasoningText(msg.content)
   const html = useMemo(() => renderMarkdown(firstText(msg.content)), [msg.content])
+  const cls = `msg-row assistant ${hit ? 'search-hit' : ''} ${current ? 'search-current' : ''}`
   return (
-    <div className="msg-row assistant">
+    <div className={cls} id={`msg-${idx}`}>
       <ReasoningBlock text={reasoning} />
       {html
         ? <div className="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
         : <div className="bubble placeholder">{msg.interrupted ? '（回复被中断）' : '（无文本输出）'}</div>}
       <div className="msg-meta">
+        <span className="msg-time">{fmtMsgTime(msg.time)}</span>
         <UsageTag usage={msg.usage} />
         <CopyButton getText={() => firstText(msg.content)} title="复制回复原文" />
       </div>
@@ -191,15 +214,16 @@ function AssistantMessage({ msg, onImageClick }) {
   )
 }
 
-function Message({ msg, onImageClick }) {
+function Message({ msg, onImageClick, idx, hit, current }) {
+  const searchCls = `${hit ? 'search-hit' : ''} ${current ? 'search-current' : ''}`.trim()
   if (msg.kind === 'note') {
-    return <div className="note-row">{msg.note}</div>
+    return <div className={`note-row ${searchCls}`} id={`msg-${idx}`}>{msg.note}</div>
   }
   if (msg.kind === 'note-error') {
-    return <div className="note-row error">{msg.note}</div>
+    return <div className={`note-row error ${searchCls}`} id={`msg-${idx}`}>{msg.note}</div>
   }
   if (msg.kind === 'tool') {
-    return <ToolCard msg={msg} />
+    return <ToolCard msg={msg} hit={hit} current={current} idx={idx} />
   }
   if (msg.kind === 'user' || msg.kind === 'user-local') {
     const injected = msg.source?.kind !== undefined && msg.source.kind !== 'user'
@@ -213,7 +237,7 @@ function Message({ msg, onImageClick }) {
       .map(b => b.text)
       .join('\n')
     return (
-      <div className="msg-row user">
+      <div className={`msg-row user ${searchCls}`} id={`msg-${idx}`}>
         <div className="user-bubble-group">
           {inlineImages.length > 0 && (
             <div className="msg-image-row">
@@ -241,12 +265,13 @@ function Message({ msg, onImageClick }) {
           {(body || inlineImages.length === 0) && (
             <div className="bubble user-bubble">{body || '（非文本内容）'}</div>
           )}
+          <div className="msg-time user-msg-time">{fmtMsgTime(msg.time)}</div>
         </div>
       </div>
     )
   }
   if (msg.kind === 'assistant') {
-    return <AssistantMessage msg={msg} />
+    return <AssistantMessage msg={msg} idx={idx} hit={hit} current={current} />
   }
   return null
 }
@@ -260,7 +285,55 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
   const [mode, setMode] = useState('build')
   const [showJump, setShowJump] = useState(false)
   const [pendingPlan, setPendingPlan] = useState(null)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [findIdx, setFindIdx] = useState(0)
   const lastAssistantRef = useRef(null)
+
+  // in-conversation search: message indices whose text contains the query
+  const findMatches = useMemo(() => {
+    const q = findQuery.trim().toLowerCase()
+    if (!q || !session?.messages) return []
+    const hits = []
+    session.messages.forEach((m, i) => {
+      let text = ''
+      if (m.kind === 'note' || m.kind === 'note-error') text = m.note ?? ''
+      else if (m.kind === 'tool') text = `${m.name ?? ''} ${typeof m.arguments === 'string' ? m.arguments : ''}`
+      else text = (m.content ?? []).map(b => b?.text ?? '').join(' ')
+      if (text.toLowerCase().includes(q)) hits.push(i)
+    })
+    return hits
+  }, [findQuery, session?.messages])
+
+  useEffect(() => {
+    if (findIdx >= findMatches.length) setFindIdx(0)
+  }, [findMatches.length, findIdx])
+
+  const jumpFind = (delta) => {
+    if (findMatches.length === 0) return
+    const next = (findIdx + delta + findMatches.length) % findMatches.length
+    setFindIdx(next)
+  }
+
+  useEffect(() => {
+    if (!findOpen || findMatches.length === 0) return
+    document.getElementById(`msg-${findMatches[findIdx]}`)
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [findIdx, findQuery, findOpen])
+
+  // Ctrl+F opens the conversation finder (overrides browser find)
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault()
+        setFindOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const closeFind = () => { setFindOpen(false); setFindQuery(''); setFindIdx(0) }
 
   // in plan mode, remember the latest settled assistant message as the plan
   useEffect(() => {
@@ -357,7 +430,9 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
     }
     setSending(true)
     setText('')
-    onSend(value || '（图片）', images, mode)
+    // image-only messages need no placeholder text — the wire protocol accepts
+    // a bare image block, and the UI renders the image itself
+    onSend(value, images, mode)
     setImages([])
     setTimeout(() => setSending(false), 800)
   }
@@ -398,15 +473,46 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
         />
       </header>
 
+      {findOpen && (
+        <div className="find-bar">
+          <IconSearch size={13} />
+          <input
+            autoFocus
+            value={findQuery}
+            placeholder="搜索对话内容…"
+            onChange={e => { setFindQuery(e.target.value); setFindIdx(0) }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') jumpFind(e.shiftKey ? -1 : 1)
+              if (e.key === 'Escape') closeFind()
+            }}
+          />
+          <span className="find-count">
+            {findMatches.length > 0 ? `${findIdx + 1}/${findMatches.length}` : findQuery.trim() ? '无结果' : ''}
+          </span>
+          <button className="find-nav" onClick={() => jumpFind(-1)} disabled={findMatches.length === 0} title="上一处">↑</button>
+          <button className="find-nav" onClick={() => jumpFind(1)} disabled={findMatches.length === 0} title="下一处">↓</button>
+          <button className="icon-btn find-close" onClick={closeFind}><IconX size={13} /></button>
+        </div>
+      )}
+
       <div className="message-list" ref={listRef}>
         {!session || session.messages.length === 0 ? (
           <div className="welcome">
-            <div className="welcome-mark"><WhaleMark size={44} /></div>
-            <h2>开始一段新任务</h2>
-            <p>直接在下方输入即可，发送后将自动创建新对话。<br />agent 会读写工作区、执行命令并维护计划。</p>
+            <div className="welcome-whale"><WhaleMark size={64} /></div>
+            <div className="welcome-title">探索未知之境</div>
+            <div className="welcome-badge">预览版</div>
           </div>
         ) : (
-          session.messages.map((m, i) => <Message key={i} msg={m} onImageClick={setLightbox} />)
+          session.messages.map((m, i) => (
+            <Message
+              key={i}
+              msg={m}
+              onImageClick={setLightbox}
+              idx={i}
+              hit={findMatches.includes(i)}
+              current={findMatches[findIdx] === i}
+            />
+          ))
         )}
         {running && <LiveThinking live={session?.livePreview} />}
         {running && session?.livePreview?.text && (
@@ -475,7 +581,7 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
           <textarea
             ref={taRef}
             value={text}
-            placeholder={running ? '直接发送可打断当前回复…' : '描述任务，Enter 发送，Shift+Enter 换行'}
+            placeholder={running ? '直接发送可打断当前回复…' : '描述你想要构建的内容'}
             onChange={e => setText(e.target.value)}
             onPaste={e => {
               const files = [...(e.clipboardData?.files ?? [])]

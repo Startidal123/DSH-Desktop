@@ -140,6 +140,7 @@ export class DshRuntime {
       messageCount: s.messages.length,
       todoCount: s.todos.length,
       pinned: s.pinned === true,
+      workspace: s.workspace ?? '',
       search: searchText.join(' ').slice(0, 4000),
     }
   }
@@ -204,6 +205,7 @@ export class DshRuntime {
       usage: s.usage,
       todos: s.todos,
       pinned: s.pinned === true,
+      workspace: s.workspace ?? '',
       messages: s.messages.map(m => this.serializeMessage(m)),
     }
   }
@@ -262,6 +264,7 @@ export class DshRuntime {
           toolByCallId: new Map(),
           serverEpoch: 0,
           pinned: s.pinned === true,
+          workspace: s.workspace ?? '',
         })
       }
       // start on the welcome screen: sessions stay listed in the sidebar,
@@ -283,6 +286,7 @@ export class DshRuntime {
         updatedAt: Date.now(),
         toolByCallId: new Map(),
         serverEpoch: this.sessionEpoch,
+        workspace: this.config.workspace || '',
       }
       this.sessions.set(id, s)
     }
@@ -722,7 +726,7 @@ export class DshRuntime {
       res = await this.request('session/prompt', {
         sessionId,
         contentBlocks: [
-          { type: 'text', text: wireText },
+          ...(wireText ? [{ type: 'text', text: wireText }] : []),
           ...wireBlocks,
         ],
       })
@@ -746,7 +750,7 @@ export class DshRuntime {
       res = await this.request('session/prompt', {
         sessionId: freshId,
         contentBlocks: [
-          { type: 'text', text: wireText },
+          ...(wireText ? [{ type: 'text', text: wireText }] : []),
           ...wireBlocks,
         ],
       })

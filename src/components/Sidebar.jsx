@@ -1,19 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
-import { LogoMark, IconPlus, IconSettings, IconTrash, IconRefresh, IconSearch, IconX } from './Icons.jsx'
+import { IconPlus, IconSettings, IconTrash, IconRefresh, IconSearch, IconX, IconFolder, IconChevron } from './Icons.jsx'
 import { renderMarkdown } from '../markdown.js'
 import { WhaleMark } from './WhaleMark.jsx'
 
-function timeLabel(ts) {
+/** Relative stamp: 刚刚 → X 分钟前 → HH:mm (<24h) → M/D */
+function relTime(ts) {
   if (!ts) return ''
+  const diff = Date.now() - ts
+  if (diff < 60_000) return '刚刚'
+  if (diff < 60 * 60_000) return `${Math.floor(diff / 60_000)} 分钟前`
   const d = new Date(ts)
-  const now = new Date()
-  const sameDay = d.toDateString() === now.toDateString()
-  if (sameDay) return d.toTimeString().slice(0, 5)
+  if (diff < 24 * 60 * 60_000) return d.toTimeString().slice(0, 5)
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
+function wsLabel(ws) {
+  if (!ws) return '默认'
+  const parts = ws.split(/[\\/]/).filter(Boolean)
+  return parts[parts.length - 1] || ws
+}
+
 const PinIcon = ({ filled }) => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'}
+  <svg width="12" height="12" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'}
     stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <path d="M12 17v5" />
     <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
@@ -67,37 +75,118 @@ function ChangePlanCard() {
   )
 }
 
-export default function Sidebar({ sessions, activeId, onSelect, onNew, onDelete, onRename, onTogglePin, onOpenSettings, runtimeStatus, onRestart, onToggleTheme, theme }) {
+export default function Sidebar({ sessions, activeId, config, onSelect, onNew, onDelete, onRename, onTogglePin, onOpenSettings, runtimeStatus, onRestart, onToggleTheme, theme }) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [renaming, setRenaming] = useState(null)
   const [renameText, setRenameText] = useState('')
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('dsh-ws-collapsed') ?? '[]')) } catch { return new Set() }
+  })
+  const [ctx, setCtx] = useState(null) // { x, y, id, pinned }
   const searchRef = useRef(null)
 
-  const q = query.trim().toLowerCase()
-  const visible = q
-    ? sessions.filter(s => (s.search ?? s.title).toLowerCase().includes(q))
-    : sessions
+  useEffect(() => { if (searchOpen) searchRef.current?.focus() }, [searchOpen])
 
   useEffect(() => {
-    if (searchOpen) searchRef.current?.focus()
-  }, [searchOpen])
+    if (!ctx) return
+    const close = () => setCtx(null)
+    const onKey = (e) => { if (e.key === 'Escape') setCtx(null) }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [ctx])
+
+  const toggleCollapse = (ws) => {
+    setCollapsed(prev => {
+      const next = new Set(prev)
+      if (next.has(ws)) next.delete(ws); else next.add(ws)
+      localStorage.setItem('dsh-ws-collapsed', JSON.stringify([...next]))
+      return next
+    })
+  }
+
+  const q = query.trim().toLowerCase()
+  const currentWs = config?.workspace ?? ''
+
+  let groups
+  if (q) {
+    const visible = sessions.filter(s => (s.search ?? s.title).toLowerCase().includes(q))
+    groups = visible.length ? [{ key: '__search__', label: `搜索结果（${visible.length}）`, sessions: visible, flat: true }] : []
+  } else {
+    const map = new Map()
+    for (const s of sessions) {
+      const key = s.workspace || currentWs
+      if (!map.has(key)) map.set(key, [])
+      map.get(key).push(s)
+    }
+    groups = [...map.entries()]
+      .map(([key, list]) => ({ key, label: wsLabel(key), sessions: list }))
+      .sort((a, b) => {
+        if (a.key === currentWs) return -1
+        if (b.key === currentWs) return 1
+        const ma = Math.max(...a.sessions.map(s => s.updatedAt ?? 0))
+        const mb = Math.max(...b.sessions.map(s => s.updatedAt ?? 0))
+        return mb - ma
+      })
+  }
 
   const commitRename = (id) => {
     if (renameText.trim()) onRename(id, renameText.trim())
     setRenaming(null)
   }
 
-  const closeSearch = () => {
-    setSearchOpen(false)
-    setQuery('')
+  const closeSearch = () => { setSearchOpen(false); setQuery('') }
+
+  const openMenu = (e, s) => {
+    e.preventDefault()
+    const x = Math.min(e.clientX, window.innerWidth - 170)
+    const y = Math.min(e.clientY, window.innerHeight - 140)
+    setCtx({ x, y, id: s.id, pinned: s.pinned === true })
   }
+
+  const renderSession = (s) => (
+    <div
+      key={s.id}
+      className={`session-item ${s.id === activeId ? 'active' : ''}`}
+      onClick={() => onSelect(s.id)}
+      onContextMenu={e => openMenu(e, s)}
+    >
+      {s.status === 'running' && <span className="spinner tiny" />}
+      <div className="session-meta">
+        {renaming === s.id ? (
+          <input
+            className="rename-input"
+            autoFocus
+            value={renameText}
+            onChange={e => setRenameText(e.target.value)}
+            onClick={e => e.stopPropagation()}
+            onKeyDown={e => {
+              if (e.key === 'Enter') commitRename(s.id)
+              if (e.key === 'Escape') setRenaming(null)
+            }}
+            onBlur={() => commitRename(s.id)}
+          />
+        ) : (
+          <div className="session-title">
+            {s.pinned && <span className="pin-mark"><PinIcon filled /></span>}
+            {s.title || '新对话'}
+          </div>
+        )}
+      </div>
+      <span className="session-time">{relTime(s.updatedAt)}</span>
+    </div>
+  )
 
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
-        <span className="brand-whale"><WhaleMark size={26} /></span>
-        <span className="brand-name">DeepSeek Harness</span>
+        <span className="brand-whale"><WhaleMark size={24} /></span>
+        <span className="brand-name">DeepSeek</span>
+        <span className="brand-tag">HARNESS</span>
       </div>
 
       <button className="new-chat" onClick={onNew}>
@@ -106,10 +195,9 @@ export default function Sidebar({ sessions, activeId, onSelect, onNew, onDelete,
       </button>
 
       <div className="session-mid">
-        <div className="session-top-spacer" />
         <ChangePlanCard />
         <div className="history-head">
-          <span className="history-title">{q ? `（${visible.length}）` : '历史对话'}</span>
+          <span className="history-title">{q ? '' : '历史对话'}</span>
           {searchOpen ? (
             <div className="history-search">
               <IconSearch size={13} />
@@ -130,68 +218,22 @@ export default function Sidebar({ sessions, activeId, onSelect, onNew, onDelete,
         </div>
 
         <div className="session-list">
-          {visible.length === 0 && (
+          {groups.length === 0 && (
             <div className="session-empty">{q ? '没有匹配的对话' : '还没有对话'}<br />{q ? '' : '点击上方「新对话」开始'}</div>
           )}
-          {visible.map(s => (
-            <div
-              key={s.id}
-              className={`session-item ${s.id === activeId ? 'active' : ''}`}
-              onClick={() => onSelect(s.id)}
-            >
-              {s.status === 'running' && <span className="spinner tiny" />}
-              <div className="session-meta">
-                {renaming === s.id ? (
-                  <input
-                    className="rename-input"
-                    autoFocus
-                    value={renameText}
-                    onChange={e => setRenameText(e.target.value)}
-                    onClick={e => e.stopPropagation()}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') commitRename(s.id)
-                      if (e.key === 'Escape') setRenaming(null)
-                    }}
-                    onBlur={() => commitRename(s.id)}
-                  />
-                ) : (
-                  <div className="session-title">
-                    {s.pinned && <span className="pin-mark"><PinIcon filled /></span>}
-                    {s.title || '新对话'}
-                  </div>
-                )}
-                <div className="session-sub">
-                  {timeLabel(s.updatedAt)}
-                  {s.todoCount > 0 && <span className="dot">·</span>}
-                  {s.todoCount > 0 && `${s.todoCount} 项任务`}
+          {groups.map(g => (
+            <div key={g.key} className="ws-group">
+              {g.flat ? (
+                <div className="ws-group-head static"><span className="ws-name">{g.label}</span></div>
+              ) : (
+                <div className="ws-group-head" onClick={() => toggleCollapse(g.key)} title={g.key}>
+                  <IconChevron size={12} className={`ws-chevron ${collapsed.has(g.key) ? '' : 'open'}`} />
+                  <IconFolder size={13} />
+                  <span className="ws-name">{g.label}</span>
+                  <span className="ws-count">{g.sessions.length}</span>
                 </div>
-              </div>
-              <div className="session-ops">
-                <button
-                  className={`icon-btn session-op ${s.pinned ? 'pinned' : ''}`}
-                  title={s.pinned ? '取消置顶' : '置顶'}
-                  onClick={e => { e.stopPropagation(); onTogglePin(s.id) }}
-                >
-                  <PinIcon filled={s.pinned} />
-                </button>
-                <button
-                  className="icon-btn session-op"
-                  title="重命名"
-                  onClick={e => { e.stopPropagation(); setRenaming(s.id); setRenameText(s.title) }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-                  </svg>
-                </button>
-                <button
-                  className="icon-btn danger session-op"
-                  title="删除对话"
-                  onClick={e => { e.stopPropagation(); onDelete(s.id) }}
-                >
-                  <IconTrash size={13} />
-                </button>
-              </div>
+              )}
+              {(g.flat || !collapsed.has(g.key)) && g.sessions.map(renderSession)}
             </div>
           ))}
         </div>
@@ -219,6 +261,29 @@ export default function Sidebar({ sessions, activeId, onSelect, onNew, onDelete,
           <IconSettings />
         </button>
       </div>
+
+      {ctx && (
+        <div
+          className="ctx-menu"
+          style={{ left: ctx.x, top: ctx.y }}
+          onMouseDown={e => e.stopPropagation()}
+        >
+          <button onClick={() => { onTogglePin(ctx.id); setCtx(null) }}>
+            {ctx.pinned ? '取消置顶' : '置顶'}
+          </button>
+          <button onClick={() => {
+            const s = sessions.find(x => x.id === ctx.id)
+            setRenaming(ctx.id)
+            setRenameText(s?.title ?? '')
+            setCtx(null)
+          }}>
+            重命名
+          </button>
+          <button className="danger" onClick={() => { onDelete(ctx.id); setCtx(null) }}>
+            删除对话
+          </button>
+        </div>
+      )}
     </aside>
   )
 }
