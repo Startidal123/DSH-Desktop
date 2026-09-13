@@ -5,18 +5,16 @@
 
 ## 1. 项目是什么
 
-**deepseek-harness（dsh）的桌面客户端**。dsh 是 DeepSeek 开源的 coding-agent 框架（本机部署于 `D:\dsh\deepseek-harness`，可改），自带 Web UI 但耦合较深；本项目是一个独立的 Electron 三列客户端，通过 **stdio JSON-RPC（SDK 协议）** 驱动 dsh 的 `sdk` profile 子进程。
+**deepseek-harness（dsh）的桌面客户端**。dsh 是 DeepSeek 开源的 coding-agent 框架（客户端可在设置里指向任意部署位置，默认自动部署到客户端目录旁的 `harness/`），自带 Web UI 但耦合较深；本项目是一个独立的 Electron 三列客户端，通过 **stdio JSON-RPC（SDK 协议）** 驱动 dsh 的 `sdk` profile 子进程。
 
-三个组成部分：
+三个组成部分（以默认便携布局为例，harness 由客户端自动部署在 exe 旁）：
 ```
-D:\dsh\
-├── deepseek-harness\        # dsh 本体（官方仓库 + 我们的补丁，见 §6）
-└── dsh-client\              # 本项目（Electron 客户端）
-    ├── electron\            # 主进程（Node 侧，不走 vite）
-    ├── src\                 # 渲染进程（React）
-    ├── patches\             # 对 harness 的补丁资产
-    ├── scripts\             # 打包脚本
-    └── release\             # 打包产物（win-unpacked + zip）
+<客户端目录>\
+├── DSH Client.exe 等         # Electron 运行时（release\win-unpacked 产物）
+├── harness\                  # dsh 本体（官方仓库 + 我们的补丁，见 §6，自动部署）
+├── workspace\                # 默认工作区
+├── tools\                    # 便携工具链（git/pnpm/node，按需自动下载）
+└── resources\app\            # 应用代码（dist + electron + patches，自更新热换）
 ```
 
 ## 2. 架构与数据流

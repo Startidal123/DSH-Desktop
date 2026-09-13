@@ -12,7 +12,8 @@
 ├── dist/              # 前端构建产物（npm run publish 时生成）
 ├── patches/           # 对 deepseek-harness 的客户端补丁
 ├── scripts/           # 打包 / 发布 / 图标脚本
-└── version.json       # 发布版本戳
+├── vendor/ + build/   # 引导分支用的 rcedit 与应用图标
+└── version.json       # 发布版本戳（内容哈希）
 ```
 
 **客户端自更新机制**：各机器上运行的客户端在空闲时静默检查本仓库的 main 分支，浅克隆后只取 payload 部分（`dist/` `electron/` `patches/` `package.json` `version.json` `README.md`）热替换到安装目录的 `resources/app/`——纯源码目录（`src/`、`scripts/`）会被拉取但不参与应用。因此：
@@ -77,4 +78,4 @@ npm run dist       # 打 zip 分发版（含 exe）
 - **发消息没回复**：看对话流红色错误条（如 max_tokens 超端点上限，在模型配置调低）
 - **杀毒报警**：未签名 exe 的正常误报，将客户端文件夹加入信任区
 
-MIT License
+[MIT](LICENSE) License

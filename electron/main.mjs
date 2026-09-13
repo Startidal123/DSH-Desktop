@@ -252,10 +252,8 @@ function scheduleSilentUpdate(attempt = 0) {
 /** Client payload first (seconds), then harness (heavier) when enabled. */
 async function silentSelfUpdate() {
   const cfg = ensureRuntime().config
-  console.log('[silent-update] client?', cfg.clientAutoUpdate !== false, 'repo:', cfg.clientUpdateRepo)
   if (cfg.clientAutoUpdate !== false && cfg.clientUpdateRepo) {
     const res = await runClientUpdate({ silent: true })
-    console.log('[silent-update] client result:', JSON.stringify(res))
     // a main-process change relaunches the app; harness check happens next boot
     if (res?.ok && res.relaunch) return
   }
@@ -268,7 +266,6 @@ let updatingClient = false
 
 async function runClientUpdate({ silent = false } = {}) {
   if (updatingClient) return { ok: false, error: '已有客户端更新任务在进行中' }
-  console.log('[client-update] run, isPackaged =', app.isPackaged)
   if (!app.isPackaged) return { ok: true, updated: false, devMode: true }
   updatingClient = true
   try {
