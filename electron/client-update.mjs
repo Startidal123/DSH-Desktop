@@ -78,7 +78,7 @@ const PAYLOAD_FILES = ['package.json', 'version.json', 'README.md']
  * decides reload vs relaunch. Throws with a human message on failure; a
  * failed swap never damages the running install.
  */
-export async function clientUpdate({ appDir, repoUrl, gitBin = 'git', skipCommit = '', onStep }) {
+export async function clientUpdate({ appDir, repoUrl, gitBin = 'git', skipCommit = '', userDataDir = '', onStep }) {
   appDir = resolve(appDir)
   if (!repoUrl) throw new Error('未配置客户端更新仓库地址')
   onStep?.('检查客户端更新…')
@@ -154,5 +154,12 @@ export async function clientUpdate({ appDir, repoUrl, gitBin = 'git', skipCommit
   }
 
   onStep?.(changed ? '客户端已更新（主进程变更，即将重启）' : '客户端已更新（界面变更，刷新窗口生效）')
+  // reset boot bookkeeping: the new payload starts with a clean slate (the
+  // loader records its attempt, main.mjs records success on ready)
+  if (userDataDir) {
+    for (const f of ['client-boot-ok', 'client-boot-attempt']) {
+      try { rmSync(join(userDataDir, f), { force: true }) } catch { /* best effort */ }
+    }
+  }
   return { updated: true, mainChanged: changed, head: remote.sha }
 }

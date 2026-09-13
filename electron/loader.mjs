@@ -1,7 +1,11 @@
 // Boot loader: tiny on purpose — it must never fail to load itself.
-// Responsibilities: (1) roll back a broken self-update before main loads,
-// (2) clear stale rollback dirs from healthy boots, (3) import main.mjs and
-// heal the install if that import itself throws.
+// Update hygiene before main loads:
+//   success flag (client-boot-ok) names the payload that last reached ready
+//   attempt flag (client-boot-attempt) names the payload currently booting
+// Rollback happens ONLY when the same payload was attempted before and never
+// reached ready — a fresh update's first boot (attempt recorded now) always
+// gets a clean chance, and a crash between import and ready triggers the
+// rollback on the NEXT boot.
 // IMPORTANT: main.mjs must be imported at the TOP LEVEL (not inside
 // whenReady) — it calls protocol.registerSchemesAsPrivileged, which is only
 // legal before app 'ready'.
@@ -13,7 +17,9 @@ const electronDir = dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za
 const appDir = join(electronDir, '..')
 const appOld = join(appDir, '..', 'app-old')
 const appNext = join(appDir, '..', 'app-next')
-const bootFlag = join(app.getPath('userData'), 'client-boot-ok')
+const userDataDir = app.getPath('userData')
+const bootFlag = join(userDataDir, 'client-boot-ok')
+const attemptFlag = join(userDataDir, 'client-boot-attempt')
 
 function rollback() {
   try {
@@ -26,24 +32,45 @@ function rollback() {
   }
 }
 
-// pre-main hygiene: resolve any half-finished update state synchronously.
-// boot-ok is only trusted when it names THIS payload's commit — a flag left
-// by the previous install must not clear the rollback dir for a newer,
-// never-booted payload.
-let bootOkForThisPayload = false
-try {
-  const installed = readFileSync(join(appDir, '.installed-commit'), 'utf8').trim()
-  bootOkForThisPayload = existsSync(bootFlag) && readFileSync(bootFlag, 'utf8').trim() === installed
-} catch { /* absent markers = first boot */ }
-try { rmSync(bootFlag, { force: true }) } catch { /* absent is fine */ }
-if (existsSync(appNext)) rmSync(appNext, { recursive: true, force: true })
-if (existsSync(appOld)) {
-  if (!bootOkForThisPayload) {
-    // this payload never booted successfully — the update was bad, undo it
-    rollback()
-  } else {
-    rmSync(appOld, { recursive: true, force: true })
+function readFlag(path) {
+  try { return readFileSync(path, 'utf8').trim() } catch { return null }
+}
+
+let currentCommit = null
+try { currentCommit = readFileSync(join(appDir, '.installed-commit'), 'utf8').trim() } catch { /* dev / edge */ }
+
+if (currentCommit !== null) {
+  if (existsSync(appNext)) rmSync(appNext, { recursive: true, force: true })
+
+  const provedHealthy = readFlag(bootFlag) === currentCommit
+  if (existsSync(appOld)) {
+    if (provedHealthy) {
+      // this payload already reached ready before; the old dir is stale
+      rmSync(appOld, { recursive: true, force: true })
+    } else {
+      const attemptedBefore = readFlag(attemptFlag) === currentCommit
+      if (attemptedBefore) {
+        // same payload tried and never reached ready — bad update, undo it
+        try {
+          mkdirSync(userDataDir, { recursive: true })
+          writeFileSync(join(userDataDir, 'client-bad-commit'), currentCommit)
+        } catch { /* best effort */ }
+        if (rollback()) {
+          app.relaunch()
+          app.quit()
+        } else {
+          rmSync(appOld, { recursive: true, force: true })
+        }
+      }
+      // else: first boot of a fresh update — fall through and give it a chance
+    }
   }
+  // record the attempt; ready-to-show (main.mjs) replaces it with the
+  // success flag if this boot makes it
+  try {
+    mkdirSync(userDataDir, { recursive: true })
+    writeFileSync(attemptFlag, currentCommit)
+  } catch { /* best effort */ }
 }
 
 try {
@@ -52,9 +79,8 @@ try {
   console.error('[loader] main.mjs failed to load:', err)
   // blacklist the poisoned commit so silent updates never retry it in a loop
   try {
-    mkdirSync(app.getPath('userData'), { recursive: true })
-    const bad = readFileSync(join(appDir, '.installed-commit'), 'utf8').trim()
-    writeFileSync(join(app.getPath('userData'), 'client-bad-commit'), bad)
+    mkdirSync(userDataDir, { recursive: true })
+    writeFileSync(join(userDataDir, 'client-bad-commit'), currentCommit ?? 'unknown')
   } catch { /* best effort */ }
   if (existsSync(appOld) && rollback()) {
     app.relaunch()

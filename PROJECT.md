@@ -45,7 +45,7 @@
 | 文件 | 职责 |
 |---|---|
 | `main.mjs` | 窗口创建（暗色 titleBarOverlay + 主题联动 `dsh:setNativeTheme`）；全部 `ipcMain.handle`；`killOrphanRuntimes`（启动清残留防写句柄占用）；`scheduleReconnect`（崩溃指数退避重连×5）；`runHarnessPipeline`（更新流水线入口，ensureTools 自动装便携工具链）；`runClientUpdate` / `silentSelfUpdate`（客户端自更新：空闲守卫 → 先客户端后 harness；界面改动 reload / 主进程改动 relaunch）；右键菜单注册（HKCU 注册表 `Directory\shell\DSHClient`，命令带 `--workspace "%V"`）；渲染错误写 `userData/crash.log`；窗口 ready-to-show 写 `client-boot-ok`（loader 回滚判据）；`appRoot` 解析（dev=项目目录，打包=exe 目录，harness/workspace 默认相对它） |
-| `loader.mjs` | **打包版启动入口**（package.json main 指向它）：启动时若有 app-old 且上次无 boot-ok 标记 → 回滚上次自更新；有标记 → 清理 app-old；清残留 app-next；import main.mjs，若它抛错且有 app-old → 回滚+relaunch。**此文件必须保持极简，永不参与自更新内容变更** |
+| `loader.mjs` | **打包版启动入口**（package.json main 指向它）：三标记状态机——`client-boot-attempt`（loader 启动时写 = 当前 commit）+ `client-boot-ok`（main ready-to-show 时写并清 attempt）。回滚判据 = **同 commit 尝试过且从未到达 ready**（attempt 匹配但无成功标记），而非"标记不匹配"——单纯的不匹配只是新更新首启的正常状态（历史 bug：旧逻辑按不匹配回滚，导致每次主进程更新被误回滚形成翻转循环）；import main.mjs 抛错 → 黑名单+回滚+relaunch。**此文件必须保持极简，永不参与自更新内容变更** |
 | `dsh-runtime.mjs` | **核心类 DshRuntime**：spawn runtime（优先构建产物 `lib/bin.js`，回退 tsx 源码；系统 node 缺失时用 `process.execPath + ELECTRON_RUN_AS_NODE`）；JSON-RPC 收发；**会话聚合**（applyEvent：user 去重保留带图片预览的 echo、assistant/usage 累计、tool 卡片配对、todo last-write-wins、turn/end 错误转 note-error 红条）；`applyStreamChunk`（livePreview 实时思考/输出）；审批通知进 `session.approvals`；图片落盘 `attachments/` + `dshimg://` 协议引用；**会话持久化** `sessions.json`（stripBlocks 瘦身：文本截断、图片只留 path 引用）；prompt 时 PLAN_PREFIX 注入（计划模式）；resume 失败回退新 ID；orderedSessions（置顶优先+时间倒序） |
 | `harness-update.mjs` | `setToolchain`（接收便携工具链注入，run() 内做 git/pnpm 命令前缀替换+env 合并）；`harnessStatus`（HEAD/版本/补丁状态）；`fetchLatest`（**直连 GitHub 失败自动回退 ghfast.top 镜像**）；`updateHarness`（无仓库→clone --depth 1；有→checkout 补丁文件+stash+ff merge；然后 ensurePatched 幂等补丁→installAndBuild）；**build stamp**（`.dsh-build-stamp` 记 HEAD+补丁 md5，没变跳过 install/build） |
 | `toolchain.mjs` | `ensureTools(appRoot, electronExe)`：系统缺 git → 下载 MinGit 到 `tools/git`（GitHub→ghfast 回退）；缺 pnpm → 下载独立 pnpm.exe（npmmirror）；缺 node → **Electron 二进制硬链接为 tools/node.exe**（ELECTRON_RUN_AS_NODE 模式，PATH 注入给 pnpm run scripts）。`toolchainStatus` 供设置页显示来源 |
@@ -92,7 +92,7 @@
 
 - **检查**：`git ls-remote <repo> main` vs 安装时写入的 `.installed-commit`；CHANNEL 常量默认 main（预留 beta 通道，改一处即可）
 - **生效**：electron/ 有差异（**行尾规范化后对比**——CRLF 污染的克隆不得误判为主进程变更）→ `app.relaunch()`；仅 dist 变 → `win.webContents.reload()` 秒级
-- **安全**：payload 结构校验拒坏包；交换用改名而非删除（失败自动放弃，运行中的安装无损）；`app-old` 保留一个启动周期 + `client-boot-ok` 标记（**内容 = 成功启动的那个 payload 的 commit**，loader 只在标记匹配当前安装时才清理 app-old——防止前任版本的标记误清新版本的回滚目录）
+- **安全**：payload 结构校验拒坏包；交换用改名而非删除（失败自动放弃，运行中的安装无损）；`app-old` 保留至新 payload 首次健康启动；boot 状态机（attempt/ok 双标记）见 §3 loader.mjs——**切勿改回"boot-ok 不匹配即回滚"**（历史 bug：新更新首启必然不匹配 → 误回滚 → 翻转循环）
 - **回滚**：main.mjs 加载失败 → loader 写 `client-bad-commit` 黑名单（记录坏 commit）→ 回滚 app-old → relaunch；**黑名单防死循环**：静默更新跳过黑名单 commit（仓库持续坏版本时不会每 8 秒闪一次），手动"检查更新"清除黑名单强制重试
 - **配置**：`clientUpdateRepo` / `clientAutoUpdate`（默认 true）；dev 模式（!isPackaged）自动跳过
 - **payload 组成**：dist/ + electron/ + patches/ + package.json + version.json + README.md（PAYLOAD_PARTS/PAYLOAD_FILES）

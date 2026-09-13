@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } from 'electron'
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { execSync, exec } from 'node:child_process'
 import { resolve, join, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -209,6 +209,8 @@ function createWindow() {
       mkdirSync(app.getPath('userData'), { recursive: true })
       const installed = readFileSync(join(app.getAppPath(), '.installed-commit'), 'utf8').trim()
       writeFileSync(join(app.getPath('userData'), 'client-boot-ok'), installed)
+      // the attempt recorded by loader.mjs is settled: this boot made it
+      rmSync(join(app.getPath('userData'), 'client-boot-attempt'), { force: true })
     } catch { /* best effort */ }
   })
   // warm the runtime up in the background so the first prompt is instant
@@ -286,6 +288,7 @@ async function runClientUpdate({ silent = false } = {}) {
       appDir: app.getAppPath(),
       repoUrl: rt.config.clientUpdateRepo,
       gitBin: tc.git,
+      userDataDir: app.getPath('userData'),
       ...(badCommit ? { skipCommit: badCommit } : {}),
       onStep: (text) => send('dsh:clientProgress', { text }),
     })
