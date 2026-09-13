@@ -1,0 +1,224 @@
+import { useEffect, useRef, useState } from 'react'
+import { LogoMark, IconPlus, IconSettings, IconTrash, IconRefresh, IconSearch, IconX } from './Icons.jsx'
+import { renderMarkdown } from '../markdown.js'
+import { WhaleMark } from './WhaleMark.jsx'
+
+function timeLabel(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  const now = new Date()
+  const sameDay = d.toDateString() === now.toDateString()
+  if (sameDay) return d.toTimeString().slice(0, 5)
+  return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
+const PinIcon = ({ filled }) => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'}
+    stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M12 17v5" />
+    <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
+  </svg>
+)
+
+function ChangePlanCard() {
+  const [plans, setPlans] = useState([])
+  const [openDoc, setOpenDoc] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    const load = () => {
+      window.dsh.listChangePlans()
+        .then(list => { if (alive) setPlans(list ?? []) })
+        .catch(() => {})
+    }
+    load()
+    const timer = setInterval(load, 15000)
+    return () => { alive = false; clearInterval(timer) }
+  }, [])
+
+  if (plans.length === 0) return null
+
+  return (
+    <div className="stat-card change-plan-card">
+      <div className="stat-card-title">变更记录</div>
+      {plans.slice(0, 5).map(p => (
+        <button key={p.name} className="cp-item" onClick={() => setOpenDoc(p)}>
+          <span className="cp-name">{p.title}</span>
+          <span className="cp-time">{new Date(p.mtime).toLocaleDateString()}</span>
+        </button>
+      ))}
+      {plans.length > 5 && <div className="cp-more">还有 {plans.length - 5} 条…</div>}
+      {openDoc && (
+        <div className="lightbox" onClick={() => setOpenDoc(null)}>
+          <div className="cp-doc" onClick={e => e.stopPropagation()}>
+            <div className="cp-doc-head">
+              <span className="cp-doc-title">{openDoc.title}</span>
+              <button className="lightbox-close" onClick={() => setOpenDoc(null)}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="cp-doc-body markdown-body"
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(openDoc.content) }} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function Sidebar({ sessions, activeId, onSelect, onNew, onDelete, onRename, onTogglePin, onOpenSettings, runtimeStatus, onRestart, onToggleTheme, theme }) {
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [renaming, setRenaming] = useState(null)
+  const [renameText, setRenameText] = useState('')
+  const searchRef = useRef(null)
+
+  const q = query.trim().toLowerCase()
+  const visible = q
+    ? sessions.filter(s => (s.search ?? s.title).toLowerCase().includes(q))
+    : sessions
+
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus()
+  }, [searchOpen])
+
+  const commitRename = (id) => {
+    if (renameText.trim()) onRename(id, renameText.trim())
+    setRenaming(null)
+  }
+
+  const closeSearch = () => {
+    setSearchOpen(false)
+    setQuery('')
+  }
+
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-head">
+        <span className="brand-whale"><WhaleMark size={26} /></span>
+        <span className="brand-name">DeepSeek Harness</span>
+      </div>
+
+      <button className="new-chat" onClick={onNew}>
+        <IconPlus />
+        <span>新对话</span>
+      </button>
+
+      <div className="session-mid">
+        <div className="session-top-spacer" />
+        <ChangePlanCard />
+        <div className="history-head">
+          <span className="history-title">{q ? `（${visible.length}）` : '历史对话'}</span>
+          {searchOpen ? (
+            <div className="history-search">
+              <IconSearch size={13} />
+              <input
+                ref={searchRef}
+                value={query}
+                placeholder="搜索…"
+                onChange={e => setQuery(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Escape') closeSearch() }}
+              />
+              <button className="icon-btn search-clear" onClick={closeSearch}><IconX size={12} /></button>
+            </div>
+          ) : (
+            <button className="icon-btn history-search-btn" title="搜索对话" onClick={() => setSearchOpen(true)}>
+              <IconSearch size={15} />
+            </button>
+          )}
+        </div>
+
+        <div className="session-list">
+          {visible.length === 0 && (
+            <div className="session-empty">{q ? '没有匹配的对话' : '还没有对话'}<br />{q ? '' : '点击上方「新对话」开始'}</div>
+          )}
+          {visible.map(s => (
+            <div
+              key={s.id}
+              className={`session-item ${s.id === activeId ? 'active' : ''}`}
+              onClick={() => onSelect(s.id)}
+            >
+              {s.status === 'running' && <span className="spinner tiny" />}
+              <div className="session-meta">
+                {renaming === s.id ? (
+                  <input
+                    className="rename-input"
+                    autoFocus
+                    value={renameText}
+                    onChange={e => setRenameText(e.target.value)}
+                    onClick={e => e.stopPropagation()}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') commitRename(s.id)
+                      if (e.key === 'Escape') setRenaming(null)
+                    }}
+                    onBlur={() => commitRename(s.id)}
+                  />
+                ) : (
+                  <div className="session-title">
+                    {s.pinned && <span className="pin-mark"><PinIcon filled /></span>}
+                    {s.title || '新对话'}
+                  </div>
+                )}
+                <div className="session-sub">
+                  {timeLabel(s.updatedAt)}
+                  {s.todoCount > 0 && <span className="dot">·</span>}
+                  {s.todoCount > 0 && `${s.todoCount} 项任务`}
+                </div>
+              </div>
+              <div className="session-ops">
+                <button
+                  className={`icon-btn session-op ${s.pinned ? 'pinned' : ''}`}
+                  title={s.pinned ? '取消置顶' : '置顶'}
+                  onClick={e => { e.stopPropagation(); onTogglePin(s.id) }}
+                >
+                  <PinIcon filled={s.pinned} />
+                </button>
+                <button
+                  className="icon-btn session-op"
+                  title="重命名"
+                  onClick={e => { e.stopPropagation(); setRenaming(s.id); setRenameText(s.title) }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                  </svg>
+                </button>
+                <button
+                  className="icon-btn danger session-op"
+                  title="删除对话"
+                  onClick={e => { e.stopPropagation(); onDelete(s.id) }}
+                >
+                  <IconTrash size={13} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="sidebar-foot">
+        <button className="icon-btn" title="重启运行时" onClick={onRestart}>
+          <IconRefresh />
+        </button>
+        <button className="icon-btn" title={theme === 'light' ? '切换暗色' : '切换亮色'} onClick={onToggleTheme}>
+          {theme === 'light' ? (
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+            </svg>
+          ) : (
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+            </svg>
+          )}
+        </button>
+        <button className="icon-btn" title="设置" onClick={onOpenSettings}>
+          <IconSettings />
+        </button>
+      </div>
+    </aside>
+  )
+}

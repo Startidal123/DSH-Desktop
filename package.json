@@ -1,0 +1,55 @@
+{
+  "name": "dsh-client",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness desktop client: three-column chat UI with token/cache stats and todo list",
+  "private": true,
+  "type": "module",
+  "main": "electron/loader.mjs",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron . --dev\"",
+    "build": "vite build",
+    "start": "electron .",
+    "preview": "vite build && electron .",
+    "dist": "node scripts/package-dist.mjs",
+    "publish": "node scripts/publish-payload.mjs"
+  },
+  "build": {
+    "appId": "com.dsh.client",
+    "productName": "DSH Client",
+    "asar": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "patches/**",
+      "README.md",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "DSH-Client-Portable-${version}.exe",
+      "signAndEditExecutable": false
+    }
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^3.0.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sharp": "^0.35.4",
+    "vite": "^6.0.7",
+    "wait-on": "^8.0.1"
+  }
+}

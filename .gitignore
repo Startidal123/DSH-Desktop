@@ -1,0 +1,19 @@
+# dependencies & build output
+node_modules/
+
+# packaged app output (contains exe, bundled harness/workspace/tools after runs)
+release/
+
+# portable toolchain downloaded at runtime
+tools/
+
+# runtime-sibling defaults on fresh clones running dev mode
+harness/
+workspace/
+
+# secrets & logs
+.env
+*.log
+
+# payload staging (single-repo publish builds straight into dist/)
+payload-repo/

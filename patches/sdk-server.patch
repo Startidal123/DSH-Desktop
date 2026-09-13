@@ -1,0 +1,171 @@
+diff --git a/packages/sdk/server/src/index.ts b/packages/sdk/server/src/index.ts
+index 963b4fb3bd..c277b9d953 100644
+--- a/packages/sdk/server/src/index.ts
++++ b/packages/sdk/server/src/index.ts
+@@ -19,7 +19,7 @@ export * from './server.ts'
+ 
+ export const name = 'sdk-jsonrpc-server'
+ // Only the agent factory is required; initialize reads the optional LLM seam with ctx.get().
+-export const inject = ['agents']
++export const inject = ['agents', 'systemPrompt']
+ 
+ /** JSON-RPC deployment config plus runtime-only test hooks. */
+ export interface JsonRpcConfig {
+diff --git a/packages/sdk/server/src/server.ts b/packages/sdk/server/src/server.ts
+index 1cc17059c9..d0eb4f94f6 100644
+--- a/packages/sdk/server/src/server.ts
++++ b/packages/sdk/server/src/server.ts
+@@ -6,6 +6,8 @@
+  */
+ 
+ import type { Context } from '@deepseek-ai/cordis'
++import type {} from '@deepseek-ai/dsh-system-prompt'
++import type { ApprovalOutcome, ApprovalRequestEvent } from '@deepseek-ai/dsh-user-approval/types'
+ import { resolve } from 'node:path'
+ import { brandString } from '@deepseek-ai/dsh-brand'
+ import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
+@@ -30,6 +32,8 @@ import type {
+ 
+ interface SessionRecord {
+   handle: AgentHandle
++  /** Disposer of this record's live stream frame subscription. */
++  streamDisposer?: () => void
+ }
+ 
+ function encodedImage(block: SessionPromptParams['contentBlocks'][number]): block is SdkEncodedImageBlock {
+@@ -82,6 +86,7 @@ export class HarnessSdkJsonRpcServer {
+   private readonly sessions = new Map<string, SessionRecord>()
+   private readonly sessionCreations = new Map<string, Promise<SessionRecord>>()
+   private readonly disposers: (() => void)[] = []
++  private readonly pendingApprovals = new Map<string, (outcome: ApprovalOutcome) => void>()
+   private shutdownTask: Promise<Record<string, never>> | undefined
+   private shuttingDown = false
+   private initialized = false
+@@ -125,6 +130,42 @@ export class HarnessSdkJsonRpcServer {
+       }
+       transport.notify('subagent.finished', payload)
+     }))
++    // Approval bridge: without an answerer every ask-policy request fails
++    // closed. This answerer forwards the question to the SDK client and holds
++    // the tool call open until the human answers (or the turn withdraws it).
++    this.disposers.push(ctx.on('approval/request', (req: ApprovalRequestEvent, next: () => Promise<ApprovalOutcome>): Promise<ApprovalOutcome> => {
++      if (this.shuttingDown) return next()
++      const approvalId = `apr_${Math.random().toString(36).slice(2, 10)}`
++      const sessionId = String(req.agent.session.id)
++      const settle = new Promise<ApprovalOutcome>((resolve) => {
++        this.pendingApprovals.set(approvalId, resolve)
++      })
++      this.transport.notify('session.approval', {
++        sessionId,
++        approvalId,
++        toolName: req.toolName,
++        reason: req.reason ?? '',
++      })
++      req.signal?.addEventListener('abort', () => {
++        this.pendingApprovals.delete(approvalId)
++        this.transport.notify('session.approval-withdrawn', { sessionId, approvalId })
++      }, { once: true })
++      return settle
++    }))
++    // Change-plan protocol: instruct the model to file a human-readable
++    // change record before large edits, so approvals carry context.
++    this.disposers.push(ctx.systemPrompt.section({
++      name: 'sdk-client:change-plan-protocol',
++      order: 450,
++      text: [
++        '## Change-plan protocol',
++        '',
++        'Before any large or risky change (multi-file restructuring, destructive edits, dependency or config changes, or anything hard to reverse):',
++        '1. First write a change record to `.dsh-changes/CP-<number>-<short-slug>.md` in the session workspace. It must state: what changes, why it is needed, affected files, and rollback notes.',
++        '2. Then proceed with the edit. Sensitive steps pause for human approval; the human reads your change record before deciding, so keep it accurate and concise.',
++        'Small, easily reversible edits (single-file tweaks, comments, new scratch files) need no change record. Never delete or rewrite existing change records.',
++      ].join('\n'),
++    }))
+   }
+ 
+   /**
+@@ -249,6 +290,10 @@ export class HarnessSdkJsonRpcServer {
+         return this.initialize(params as unknown as InitializeParams)
+       case 'session/prompt':
+         return this.prompt(params as unknown as SessionPromptParams)
++      case 'session/interrupt':
++        return this.interrupt(params as unknown as { sessionId: string })
++      case 'session/approvalDecide':
++        return this.approvalDecide(params as unknown as { approvalId: string; outcome: 'allowed' | 'rejected' })
+       case 'shutdown':
+         return this.shutdown()
+       default:
+@@ -256,6 +301,30 @@ export class HarnessSdkJsonRpcServer {
+     }
+   }
+ 
++  /**
++   * Resolve a pending approval the client forwarded earlier; a late decision
++   * for an already-withdrawn request is a silent no-op (the seam discards it).
++   */
++  private approvalDecide(params: { approvalId: string; outcome: 'allowed' | 'rejected' }): Record<string, never> {
++    const settle = this.pendingApprovals.get(params.approvalId)
++    if (settle === undefined) return {}
++    this.pendingApprovals.delete(params.approvalId)
++    settle(params.outcome === 'allowed' ? 'allowed-once' : 'rejected')
++    return {}
++  }
++
++  /**
++   * Abort the session's active turn and clear queued work; the agent settles
++   * any partial assistant content as an interrupted message and returns idle.
++   */
++  private async interrupt(params: { sessionId: string }): Promise<Record<string, never>> {
++    if (!this.initialized) throw new Error('SDK server is not initialized')
++    const rec = await this.getOrCreateSession(params.sessionId)
++    this.assertLiveAgent(rec, params.sessionId)
++    rec.handle.agent.cancel({ kind: 'user' }, { keepInbox: false })
++    return {}
++  }
++
+   private async getOrCreateSession(sessionId: string): Promise<SessionRecord> {
+     if (this.shuttingDown) throw new Error('SDK server is shutting down')
+     const existing = this.sessions.get(sessionId)
+@@ -276,17 +345,36 @@ export class HarnessSdkJsonRpcServer {
+     // rows in the host plane, so this agent reads them from the global layer. A
+     // deployment that configures a roster has to join one here first
+     // (@deepseek-ai/dsh-agent-presets README, "Composing a child agent").
++    const agentOptions = {
++      provider: this.provider,
++      model: this.model,
++      ...this.reasoningEffort === undefined ? {} : { reasoningEffort: this.reasoningEffort },
++      ...this.maxTokens === undefined ? {} : { maxTokens: this.maxTokens },
++    }
++    // A persisted session with this id cannot be re-created (the persistence
++    // backend refuses duplicate ids); resume rehydrates its history so a
++    // restarted client keeps the model context.
+     const handle = await this.ctx.agents.create({
+       sessionId: brandString<SessionId>(sessionId),
+       meta: { cwd: this.cwd },
+-      agentOptions: {
+-        provider: this.provider,
+-        model: this.model,
+-        ...this.reasoningEffort === undefined ? {} : { reasoningEffort: this.reasoningEffort },
+-        ...this.maxTokens === undefined ? {} : { maxTokens: this.maxTokens },
+-      },
++      agentOptions,
++    }).catch((error: unknown) => {
++      const message = error instanceof Error ? error.message : String(error)
++      if (message.includes('already exists')) {
++        return this.ctx.agents.resume({
++          resumeSessionId: brandString<SessionId>(sessionId),
++          agentOptions,
++        })
++      }
++      throw error
+     })
+     const rec: SessionRecord = { handle }
++    // Forward live assistant stream frames as session.stream notifications so
++    // SDK clients can render thinking/output incrementally (the durable
++    // assistant/attempt event only settles after the stream ends).
++    rec.streamDisposer = handle.agent.ctx.on('agent/assistant-stream', ({ frame }) => {
++      this.transport.notify('session.stream', { sessionId, frame })
++    })
+     this.sessions.set(sessionId, rec)
+     return rec
+   }
