@@ -133,9 +133,10 @@ for (const file of PAYLOAD_FILES) {
   if (existsSync(join(root, file))) cpSync(join(root, file), join(appDir, file))
 }
 writeFileSync(join(appDir, '.installed-commit'), 'client-branch-bootstrap\n')
-// bootstrap pieces at the branch root; setup.bat must be GBK-encoded — cmd.exe
-// parses batch files in the ANSI codepage, and UTF-8 Chinese desyncs its parser
-writeFileSync(join(tmp, 'setup.bat.utf8'), setupBat)
+// bootstrap pieces at the branch root; setup.bat must be GBK-encoded AND
+// CRLF-terminated — cmd.exe's parser (parenthesized blocks especially)
+// desyncs on LF-only batch files
+writeFileSync(join(tmp, 'setup.bat.utf8'), setupBat.replace(/\r?\n/g, '\r\n'))
 execSync(
   `powershell -NoProfile -Command "$c = Get-Content -Raw -Encoding UTF8 'setup.bat.utf8'; [System.IO.File]::WriteAllText('setup.bat', $c, [System.Text.Encoding]::GetEncoding(936))"`,
   { cwd: tmp, windowsHide: true, stdio: 'pipe' },
