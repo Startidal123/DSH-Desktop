@@ -32,7 +32,7 @@ function ClientUpdateSection({ lines }) {
   const status = usePipelineStatus(
     () => window.dsh.clientStatus(),
     lines,
-    t => /已是最新|已更新|失败|跳过/.test(t),
+    t => /已是最新|已更新|失败|跳过|终止/.test(t),
   )
   const [running, setRunning] = useState(false)
   useEffect(() => { setRunning(status?.busy === true) }, [status?.busy])
@@ -40,7 +40,7 @@ function ClientUpdateSection({ lines }) {
   useEffect(() => {
     const last = lines[lines.length - 1]
     if (!last) return
-    if (/已是最新|已更新|失败|跳过/.test(last)) setRunning(false)
+    if (/已是最新|已更新|失败|跳过|终止/.test(last)) setRunning(false)
     else if (lines.length > 0) setRunning(true)
   }, [lines.length])
 
@@ -50,6 +50,11 @@ function ClientUpdateSection({ lines }) {
     const res = await window.dsh.clientUpdate()
     if (!res.ok) setRunning(false)
     if (res.devMode) setRunning(false)
+  }
+
+  const forceStop = async () => {
+    await window.dsh.resetUpdateTasks().catch(() => {})
+    setRunning(false)
   }
 
   return (
@@ -66,6 +71,9 @@ function ClientUpdateSection({ lines }) {
         <button className="btn primary" disabled={running} onClick={act}>
           {running ? '更新中…' : '检查客户端更新'}
         </button>
+        <button className="btn ghost" onClick={forceStop} title="更新卡死时强制终止相关子进程并复位状态，之后可重新点击更新">
+          强制终止
+        </button>
       </div>
       <ProgressLog lines={lines} />
     </div>
@@ -76,14 +84,14 @@ function HarnessUpdateSection({ lines }) {
   const status = usePipelineStatus(
     () => window.dsh.harnessStatus(),
     lines,
-    t => /已是最新|更新完成|已确认|失败/.test(t),
+    t => /已是最新|更新完成|已确认|失败|终止/.test(t),
   )
   const [running, setRunning] = useState(false)
   useEffect(() => { setRunning(status?.busy === true) }, [status?.busy])
   useEffect(() => {
     const last = lines[lines.length - 1]
     if (!last) return
-    if (/已是最新|更新完成|已确认|失败/.test(last)) setRunning(false)
+    if (/已是最新|更新完成|已确认|失败|终止/.test(last)) setRunning(false)
     else setRunning(true)
   }, [lines.length])
 
@@ -92,6 +100,11 @@ function HarnessUpdateSection({ lines }) {
     setRunning(true)
     const res = await fn()
     if (!res.ok) setRunning(false)
+  }
+
+  const forceStop = async () => {
+    await window.dsh.resetUpdateTasks().catch(() => {})
+    setRunning(false)
   }
 
   return (
@@ -108,6 +121,9 @@ function HarnessUpdateSection({ lines }) {
         </button>
         <button className="btn ghost" disabled={running} onClick={() => act(() => window.dsh.applyHarnessPatches())} title="强制重装依赖并重建 harness（修复依赖损坏）">
           重装并重建
+        </button>
+        <button className="btn ghost" onClick={forceStop} title="更新卡死时强制终止相关子进程并复位状态，之后可重新点击更新">
+          强制终止
         </button>
       </div>
       <ProgressLog lines={lines} />

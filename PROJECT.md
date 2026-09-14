@@ -99,7 +99,7 @@
 
 ## 5. IPC 通道总表
 
-`dsh:` getState / newSession / selectSession / deleteSession / renameSession / togglePinSession / sendPrompt(text, images, mode) / interrupt / decideApproval / restart / updateConfig / addCustomModel / removeCustomModel / pickWorkspace / saveImage / listChangePlans / checkHarnessPatches / harnessStatus / harnessUpdate / applyHarnessPatches / clientStatus / clientUpdate / configLocations / openConfigFolder / contextMenuStatus / registerContextMenu / unregisterContextMenu / winControl / winIsMaximized
+`dsh:` getState / newSession / selectSession / deleteSession / renameSession / togglePinSession / sendPrompt(text, images, mode) / interrupt / decideApproval / restart / updateConfig / addCustomModel / removeCustomModel / pickWorkspace / saveImage / listChangePlans / checkHarnessPatches / harnessStatus / harnessUpdate / applyHarnessPatches / clientStatus / clientUpdate / resetUpdateTasks / configLocations / openConfigFolder / contextMenuStatus / registerContextMenu / unregisterContextMenu / winControl / winIsMaximized
 
 推送：`dsh:snapshot` / `dsh:runtime` / `dsh:harnessProgress` / `dsh:clientProgress` / `dsh:win-maximized`
 

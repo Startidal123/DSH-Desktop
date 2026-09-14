@@ -2,6 +2,7 @@ import { exec } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { resolve, dirname } from 'node:path'
+import { trackChild } from './proc-registry.mjs'
 
 export const DEFAULT_REPO = 'https://github.com/deepseek-ai/deepseek-harness'
 
@@ -19,13 +20,13 @@ function run(cmd, cwd, timeoutMs = 60000) {
     .replace(/^git /, `"${toolchain.git}" `)
     .replace(/^pnpm /, `"${toolchain.pnpm}" `)
   return new Promise((done) => {
-    exec(resolved, {
+    trackChild(exec(resolved, {
       cwd, encoding: 'utf8', timeout: timeoutMs, windowsHide: true,
       maxBuffer: 16 * 1024 * 1024,
       env: { ...process.env, ...toolchain.env },
     }, (err, stdout, stderr) => {
       done({ ok: !err, out: (stdout || '').trim(), err: ((stderr || '').trim() || (err?.message ?? '')).slice(0, 500) })
-    })
+    }))
   })
 }
 

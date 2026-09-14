@@ -7,17 +7,18 @@ import { existsSync, readFileSync, writeFileSync, rmSync, renameSync, mkdirSync,
 import { createHash } from 'node:crypto'
 import { join, dirname, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import { trackChild } from './proc-registry.mjs'
 
 const CHANNEL = 'main'
 
 function run(cmd, cwd, timeoutMs = 120000) {
   return new Promise((done) => {
-    exec(cmd, {
+    trackChild(exec(cmd, {
       cwd, encoding: 'utf8', timeout: timeoutMs, windowsHide: true,
       maxBuffer: 16 * 1024 * 1024,
     }, (err, stdout, stderr) => {
       done({ ok: !err, out: (stdout || '').trim(), err: ((stderr || '').trim() || (err?.message ?? '')).slice(0, 400) })
-    })
+    }))
   })
 }
 

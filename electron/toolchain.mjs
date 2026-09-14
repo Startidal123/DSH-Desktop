@@ -4,18 +4,19 @@
 import { exec } from 'node:child_process'
 import { existsSync, mkdirSync, createWriteStream, unlinkSync, rmSync, linkSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
+import { trackChild, trackAborter, untrackAborter } from './proc-registry.mjs'
 
 const MINGIT_URL = 'https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/MinGit-2.47.1-64-bit.zip'
 const PNPM_META = 'https://registry.npmmirror.com/@pnpm/win-x64/latest'
 
 function run(cmd, cwd, timeoutMs = 60000) {
   return new Promise((done) => {
-    exec(cmd, {
+    trackChild(exec(cmd, {
       cwd, encoding: 'utf8', timeout: timeoutMs, windowsHide: true,
       maxBuffer: 16 * 1024 * 1024,
     }, (err, stdout, stderr) => {
       done({ ok: !err, out: (stdout || '').trim(), err: ((stderr || '').trim() || (err?.message ?? '')).slice(0, 300) })
-    })
+    }))
   })
 }
 
@@ -23,6 +24,7 @@ function run(cmd, cwd, timeoutMs = 60000) {
  *  network stalls (broken proxy: 30s without bytes) or the total exceeds 5 min. */
 async function download(url, dest, onProgress) {
   const ctrl = new AbortController()
+  trackAborter(ctrl)
   let lastByte = Date.now()
   const overall = setTimeout(() => ctrl.abort(new Error('下载超时（超过 5 分钟）')), 300000)
   const watchdog = setInterval(() => {
@@ -60,6 +62,7 @@ async function download(url, dest, onProgress) {
   } finally {
     clearTimeout(overall)
     clearInterval(watchdog)
+    untrackAborter(ctrl)
   }
 }
 

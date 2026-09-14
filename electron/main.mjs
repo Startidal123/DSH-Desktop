@@ -7,6 +7,7 @@ import { DshRuntime } from './dsh-runtime.mjs'
 import { DEFAULT_REPO, harnessStatus, updateHarness, applyPatchOnly, setToolchain } from './harness-update.mjs'
 import { ensureTools, toolchainStatus } from './toolchain.mjs'
 import { clientStatus, clientUpdate } from './client-update.mjs'
+import { killAll } from './proc-registry.mjs'
 
 const isDev = process.argv.includes('--dev')
 const forceSoftwareGpu = process.argv.includes('--disable-gpu')
@@ -314,12 +315,18 @@ async function silentSelfUpdate() {
   }
 }
 
+/** Bumped by the force-reset IPC; pipelines capture it at start and abort at
+ *  the next step boundary (onStep) when it moves — so a stuck task can be
+ *  killed and re-launched without restarting the client. */
+let updateGen = 0
+
 let updatingClient = false
 
 async function runClientUpdate({ silent = false } = {}) {
   if (updatingClient) return { ok: false, error: '已有客户端更新任务在进行中' }
   if (!app.isPackaged) return { ok: true, updated: false, devMode: true }
   updatingClient = true
+  const myGen = updateGen
   try {
     const rt = ensureRuntime()
     // a commit blacklisted by loader rollback is never retried silently; a
@@ -340,7 +347,10 @@ async function runClientUpdate({ silent = false } = {}) {
       gitBin: tc.git,
       userDataDir: app.getPath('userData'),
       ...(badCommit ? { skipCommit: badCommit } : {}),
-      onStep: (step, text) => send('dsh:clientProgress', { step, text }),
+      onStep: (step, text) => {
+        if (myGen !== updateGen) throw new Error('更新任务已被强制终止')
+        send('dsh:clientProgress', { step, text })
+      },
     })
     if (res.updated) {
       if (res.mainChanged) {
@@ -353,8 +363,9 @@ async function runClientUpdate({ silent = false } = {}) {
     }
     return { ok: true, ...res }
   } catch (err) {
-    send('dsh:clientProgress', { step: 'error', text: `客户端更新失败：${err.message ?? err}` })
-    return { ok: false, error: String(err.message ?? err) }
+    const msg = String(err.message ?? err)
+    if (msg !== '更新任务已被强制终止') send('dsh:clientProgress', { step: 'error', text: `客户端更新失败：${msg}` })
+    return { ok: false, error: msg }
   } finally {
     updatingClient = false
   }
@@ -446,9 +457,13 @@ async function probeNetwork(tc) {
 async function runHarnessPipeline({ patchesOnly = false, silent = false } = {}) {
   if (updatingHarness) return { ok: false, error: '已有 harness 更新任务在进行中' }
   updatingHarness = true
+  const myGen = updateGen
   try {
     const rt = ensureRuntime()
-    const onStep = (step, text) => send('dsh:harnessProgress', { step, text })
+    const onStep = (step, text) => {
+      if (myGen !== updateGen) throw new Error('更新任务已被强制终止')
+      send('dsh:harnessProgress', { step, text })
+    }
     // pre-flight: tools must resolve (downloading portable ones when missing)
     // BEFORE any heavy step, so a broken proxy fails here instead of stalling
     // deep inside pnpm install
@@ -491,8 +506,10 @@ async function runHarnessPipeline({ patchesOnly = false, silent = false } = {}) 
     onStep('done', result.updated ? '更新完成' : '已是最新（补丁与构建已确认）')
     return { ok: true, ...result }
   } catch (err) {
-    send('dsh:harnessProgress', { step: 'error', text: String(err.message ?? err) })
-    return { ok: false, error: String(err.message ?? err) }
+    const msg = String(err.message ?? err)
+    // the reset IPC already told the user; don't double-report
+    if (msg !== '更新任务已被强制终止') send('dsh:harnessProgress', { step: 'error', text: msg })
+    return { ok: false, error: msg }
   } finally {
     updatingHarness = false
   }
@@ -505,6 +522,21 @@ ipcMain.handle('dsh:harnessStatus', async () => {
     toolchainStatus(appRoot),
   ])
   return { ...status, tools, busy: updatingHarness }
+})
+
+/** Force-clear stuck update tasks: tree-kill pipeline children, abort
+ *  downloads, release the busy flags and invalidate running pipelines (they
+ *  abort at their next step boundary). Lets the user re-launch an update
+ *  without restarting the client. */
+ipcMain.handle('dsh:resetUpdateTasks', () => {
+  const killed = killAll()
+  updateGen += 1
+  updatingHarness = false
+  updatingClient = false
+  const text = `已强制终止更新任务${killed ? `（结束 ${killed} 个子进程）` : ''}，可重新点击更新按钮`
+  send('dsh:harnessProgress', { step: 'error', text })
+  send('dsh:clientProgress', { step: 'error', text })
+  return { ok: true, killed }
 })
 
 ipcMain.handle('dsh:harnessUpdate', () => runHarnessPipeline())

@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('dsh', {
   applyHarnessPatches: () => ipcRenderer.invoke('dsh:applyHarnessPatches'),
   clientStatus: () => ipcRenderer.invoke('dsh:clientStatus'),
   clientUpdate: () => ipcRenderer.invoke('dsh:clientUpdate'),
+  resetUpdateTasks: () => ipcRenderer.invoke('dsh:resetUpdateTasks'),
   onClientProgress: (cb) => subscribe('dsh:clientProgress', cb),
   onHarnessProgress: (cb) => subscribe('dsh:harnessProgress', cb),
   restart: () => ipcRenderer.invoke('dsh:restart'),
