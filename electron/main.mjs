@@ -4,7 +4,7 @@ import { execSync, exec } from 'node:child_process'
 import { resolve, join, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DshRuntime } from './dsh-runtime.mjs'
-import { DEFAULT_REPO, harnessStatus, updateHarness, applyPatchOnly, setToolchain } from './harness-update.mjs'
+import { DEFAULT_REPO, harnessStatus, updateHarness, applyPatchOnly, setToolchain, probeNetwork } from './harness-update.mjs'
 import { ensureTools, toolchainStatus } from './toolchain.mjs'
 import { clientStatus, clientUpdate } from './client-update.mjs'
 import { killAll } from './proc-registry.mjs'
@@ -428,32 +428,6 @@ function materializePatch() {
 
 let updatingHarness = false
 
-/** Quick reachability probe through the same proxy env git/pnpm use (curl
- *  ships with Windows 10+). Returns true/false per host, or null when curl
- *  itself is unavailable — the caller then treats the probe as skipped. */
-function probeHost(url, env) {
-  return new Promise((resolve) => {
-    exec(`curl -sS -m 8 -o NUL --head "${url}"`, {
-      timeout: 15000, windowsHide: true, encoding: 'utf8',
-      env: { ...process.env, ...env },
-    }, (err) => {
-      if (err && /is not recognized|not found|ENOENT/i.test(String(err.message))) resolve(null)
-      else resolve(!err)
-    })
-  })
-}
-
-async function probeNetwork(tc) {
-  const env = tc?.env ?? {}
-  const [registry, github] = await Promise.all([
-    probeHost('https://registry.npmmirror.com/', env),
-    probeHost('https://github.com/', env),
-  ])
-  if (registry === null && github === null) return { ok: true, skipped: true }
-  if (registry === false && github === false) return { ok: false }
-  return { ok: true }
-}
-
 async function runHarnessPipeline({ patchesOnly = false, silent = false } = {}) {
   if (updatingHarness) return { ok: false, error: '已有 harness 更新任务在进行中' }
   updatingHarness = true
@@ -476,16 +450,20 @@ async function runHarnessPipeline({ patchesOnly = false, silent = false } = {}) 
       return { ok: false, error: `构建工具检测失败：${err.message}` }
     }
     setToolchain(tc)
-    if (!patchesOnly) {
-      const probe = await probeNetwork(tc)
-      if (!probe.ok) {
-        onStep('error', '网络检测失败（npm 镜像与 GitHub 均无响应），已终止更新。请检查系统代理/VPN 是否可用、能否正常访问 github.com，处理好网络后再点「检查并更新」。')
-        return { ok: false, error: '网络检测失败（npm 镜像与 GitHub 均无响应）' }
-      }
-    }
     const patch = materializePatch()
     if (!patch) return { ok: false, error: '补丁文件缺失（patches/sdk-server.patch）' }
     const repoUrl = rt.config.harnessRepo || DEFAULT_REPO
+    // no local checkout means a from-scratch clone — that genuinely needs
+    // network, so fail fast with guidance instead of a long clone timeout.
+    // An existing checkout is handled local-first inside updateHarness and
+    // degrades gracefully when offline.
+    if (!patchesOnly && !existsSync(resolve(rt.config.harnessDir, '.git'))) {
+      const probe = await probeNetwork()
+      if (!probe.ok) {
+        onStep('error', '网络检测失败（npm 镜像与 GitHub 均无响应），已终止更新。首次部署 harness 需要联网克隆仓库：请检查系统代理/VPN 与网络，处理好后再点「检查并更新」。')
+        return { ok: false, error: '网络检测失败（npm 镜像与 GitHub 均无响应）' }
+      }
+    }
     const result = patchesOnly
       ? await applyPatchOnly({ harnessDir: rt.config.harnessDir, patchFile: patch, onStep })
       : await updateHarness({
@@ -493,7 +471,6 @@ async function runHarnessPipeline({ patchesOnly = false, silent = false } = {}) 
         patchFile: patch,
         repoUrl,
         onStep,
-        ...(silent ? { skipIfPatched: true } : {}),
       })
     // reload the rebuilt artifacts (or boot a freshly deployed one)
     if (rt.child) {
@@ -503,7 +480,7 @@ async function runHarnessPipeline({ patchesOnly = false, silent = false } = {}) 
       onStep('runtime', '启动运行时…')
       await rt.ensureStarted().catch(() => {})
     }
-    onStep('done', result.updated ? '更新完成' : '已是最新（补丁与构建已确认）')
+    onStep('done', result.updated ? '更新完成' : result.offline ? '已是最新（网络不通未检查远端更新，当前为可用的本地构建）' : '已是最新（补丁与构建已确认）')
     return { ok: true, ...result }
   } catch (err) {
     const msg = String(err.message ?? err)

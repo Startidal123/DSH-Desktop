@@ -69,6 +69,28 @@ export async function fetchLatest(harnessDir, repoUrl) {
   return { ok: false }
 }
 
+let curlAvailable = null
+
+/** Quick reachability probe through the same proxy env git/pnpm use (curl
+ *  ships with Windows 10+; older systems skip the probe). */
+async function probeHost(url) {
+  const res = await run(`curl -sS -m 8 -o NUL --head "${url}"`, process.cwd(), 15000)
+  return res.ok
+}
+
+export async function probeNetwork() {
+  if (curlAvailable === null) {
+    curlAvailable = (await run('curl --version', process.cwd(), 15000)).ok
+  }
+  if (!curlAvailable) return { ok: true, skipped: true }
+  const [registry, github] = await Promise.all([
+    probeHost('https://registry.npmmirror.com/'),
+    probeHost('https://github.com/'),
+  ])
+  if (registry === false && github === false) return { ok: false }
+  return { ok: true }
+}
+
 /** Apply the client patch idempotently; throws when it conflicts upstream. */
 async function ensurePatched(harnessDir, patchFile, onStep) {
   const forward = await run(`git apply --check "${patchFile}"`, harnessDir, 30000)
@@ -174,12 +196,14 @@ async function cloneHarness({ harnessDir, repoUrl, onStep }) {
 }
 
 /**
- * Full update pipeline: fetch → fast-forward → patch → install → build.
- * With `skipIfPatched`, an up-to-date, already-patched checkout short-circuits
- * (used by the silent startup check so it never rebuilds needlessly).
- * A missing checkout switches to from-scratch deployment (clone → patch → build).
+ * Full update pipeline. Local-first: an existing checkout is patched and
+ * built BEFORE any network access, so a machine with the repo on disk keeps
+ * a working runtime even when GitHub is unreachable; the remote check is
+ * then best-effort and degrades to "keep the local build" on network
+ * failure. A missing checkout switches to from-scratch deployment
+ * (clone → patch → build), which requires network.
  */
-export async function updateHarness({ harnessDir, patchFile, repoUrl, onStep, skipIfPatched = false }) {
+export async function updateHarness({ harnessDir, patchFile, repoUrl, onStep }) {
   const hasGit = existsSync(resolve(harnessDir, '.git'))
   if (!hasGit) {
     await cloneHarness({ harnessDir, repoUrl, onStep })
@@ -189,32 +213,38 @@ export async function updateHarness({ harnessDir, patchFile, repoUrl, onStep, sk
   }
   const status = await harnessStatus(harnessDir)
   if (!status.ok) throw new Error(status.error ?? 'harness 目录无效')
-  onStep?.('fetch', `检查更新（${repoUrl}）…`)
-  const fetch = await fetchLatest(harnessDir, repoUrl)
-  if (!fetch.ok) throw new Error('无法连接仓库（直连与镜像均失败），请检查网络后重试')
-  const local = (await run('git rev-parse HEAD', harnessDir, 15000)).out
-  let updated = false
-  if (fetch.head === local) {
-    onStep?.('merge', '已是最新版本')
-    if (skipIfPatched && status.patched) {
-      onStep?.('done', '已是最新且补丁完整，无需重建')
-      return { updated: false, head: fetch.head, skipped: true }
-    }
-  } else {
-    onStep?.('merge', `拉取上游更新（${local.slice(0, 8)} → ${fetch.head.slice(0, 8)}）…`)
-    // our patches dirty sdk/server; revert those files so ff-merge can proceed
-    await run('git checkout -- packages/sdk/server', harnessDir, 30000)
-    const dirty = await run('git status --porcelain', harnessDir, 30000)
-    if (dirty.out) {
-      await run('git stash push -u -m dsh-client-auto-update', harnessDir, 30000)
-      onStep?.('merge', '本地改动已暂存（git stash）')
-    }
-    const merge = await run(`git merge --ff-only ${fetch.head}`, harnessDir, 60000)
-    if (!merge.ok) throw new Error('快进合并失败：' + merge.err)
-    updated = true
-    onStep?.('merge', '已更新到 ' + fetch.head.slice(0, 8))
-  }
+
+  // local-first: patch + build what's already on disk (build stamp makes
+  // this a fast no-op when the tree is current) so the runtime works with
+  // or without network
+  onStep?.('patch', '确认本地补丁与构建…')
   await ensurePatched(harnessDir, patchFile, onStep)
   await installAndBuild(harnessDir, patchFile, onStep)
-  return { updated, head: fetch.head }
+
+  onStep?.('fetch', `检查更新（${repoUrl}）…`)
+  const probe = await probeNetwork()
+  const fetch = probe.ok ? await fetchLatest(harnessDir, repoUrl) : { ok: false }
+  if (!fetch.ok) {
+    onStep?.('fetch', '无法连接仓库（直连与镜像均失败），跳过更新检查，保留当前本地构建')
+    return { updated: false, head: '', offline: true }
+  }
+  const local = (await run('git rev-parse HEAD', harnessDir, 15000)).out
+  if (fetch.head === local) {
+    onStep?.('merge', '已是最新版本')
+    return { updated: false, head: fetch.head }
+  }
+  onStep?.('merge', `拉取上游更新（${local.slice(0, 8)} → ${fetch.head.slice(0, 8)}）…`)
+  // our patches dirty sdk/server; revert those files so ff-merge can proceed
+  await run('git checkout -- packages/sdk/server', harnessDir, 30000)
+  const dirty = await run('git status --porcelain', harnessDir, 30000)
+  if (dirty.out) {
+    await run('git stash push -u -m dsh-client-auto-update', harnessDir, 30000)
+    onStep?.('merge', '本地改动已暂存（git stash）')
+  }
+  const merge = await run(`git merge --ff-only ${fetch.head}`, harnessDir, 60000)
+  if (!merge.ok) throw new Error('快进合并失败：' + merge.err)
+  onStep?.('merge', '已更新到 ' + fetch.head.slice(0, 8))
+  await ensurePatched(harnessDir, patchFile, onStep)
+  await installAndBuild(harnessDir, patchFile, onStep)
+  return { updated: true, head: fetch.head }
 }
