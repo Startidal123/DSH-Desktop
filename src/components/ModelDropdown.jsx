@@ -6,7 +6,7 @@ function hostOf(url) {
   try { return new URL(url).host } catch { return url }
 }
 
-export default function ModelDropdown({ provider, model, activeCustom, running, runtimeStatus, customModels, onSwitch, onChanged }) {
+export default function ModelDropdown({ provider, model, activeCustom, running, runtimeStatus, customModels, onSwitch, onChanged, dropUp = false }) {
   const [open, setOpen] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
   const [form, setForm] = useState({ label: '', baseURL: '', apiKey: '', model: '', maxTokens: '' })
@@ -80,7 +80,7 @@ export default function ModelDropdown({ provider, model, activeCustom, running, 
       </button>
 
       {open && (
-        <div className="model-menu">
+        <div className={`model-menu ${dropUp ? 'up' : ''}`}>
           <div className="model-menu-scroll">
             {MODEL_GROUPS.map(group => (
               <div className="model-group" key={group.provider}>

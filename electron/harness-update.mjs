@@ -82,7 +82,7 @@ async function ensurePatched(harnessDir, patchFile, onStep) {
     onStep?.('patch', '客户端补丁此前已应用，跳过')
     return false
   }
-  throw new Error('补丁与上游代码冲突（上游改动了 sdk/server），请手动合并 ' + patchFile)
+  throw new Error('补丁失败：与上游代码冲突（上游改动了 sdk/server），请手动合并 ' + patchFile)
 }
 
 const STAMP_FILE = '.dsh-build-stamp'
@@ -112,7 +112,7 @@ async function installAndBuild(harnessDir, patchFile, onStep) {
   for (let attempt = 1; attempt <= 2; attempt++) {
     const install = await run('pnpm install --prefer-offline', harnessDir, 300000)
     if (install.ok) break
-    if (attempt === 2) throw new Error('依赖安装失败：' + install.err)
+    if (attempt === 2) throw new Error('依赖安装失败（多为网络/代理不通）：' + install.err + '。请检查系统代理/网络后重试，或手动在 harness 目录执行 pnpm install 排查。')
     onStep?.('install', '安装超时/失败，重试一次…')
   }
   onStep?.('build', '构建 harness（约 2 分钟，请勿关闭客户端）…')

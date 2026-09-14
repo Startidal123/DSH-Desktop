@@ -240,7 +240,7 @@ app.whenReady().then(() => {
   // silent self-update: wait for idle (no running agent), then fetch+compare;
   // patch/build only when something actually changed
   const savedCfg = loadSettings().config ?? {}
-  if (savedCfg.clientAutoUpdate !== false || savedCfg.harnessAutoUpdate !== false) {
+  if (savedCfg.clientAutoUpdate !== false || savedCfg.harnessAutoUpdate === true) {
     setTimeout(() => scheduleSilentUpdate(), 8000)
   }
   app.on('activate', () => {
@@ -309,7 +309,7 @@ async function silentSelfUpdate() {
       })
     }
   }
-  if (cfg.harnessAutoUpdate !== false) {
+  if (cfg.harnessAutoUpdate === true) {
     await runHarnessPipeline({ silent: true })
   }
 }
@@ -417,19 +417,60 @@ function materializePatch() {
 
 let updatingHarness = false
 
+/** Quick reachability probe through the same proxy env git/pnpm use (curl
+ *  ships with Windows 10+). Returns true/false per host, or null when curl
+ *  itself is unavailable — the caller then treats the probe as skipped. */
+function probeHost(url, env) {
+  return new Promise((resolve) => {
+    exec(`curl -sS -m 8 -o NUL --head "${url}"`, {
+      timeout: 15000, windowsHide: true, encoding: 'utf8',
+      env: { ...process.env, ...env },
+    }, (err) => {
+      if (err && /is not recognized|not found|ENOENT/i.test(String(err.message))) resolve(null)
+      else resolve(!err)
+    })
+  })
+}
+
+async function probeNetwork(tc) {
+  const env = tc?.env ?? {}
+  const [registry, github] = await Promise.all([
+    probeHost('https://registry.npmmirror.com/', env),
+    probeHost('https://github.com/', env),
+  ])
+  if (registry === null && github === null) return { ok: true, skipped: true }
+  if (registry === false && github === false) return { ok: false }
+  return { ok: true }
+}
+
 async function runHarnessPipeline({ patchesOnly = false, silent = false } = {}) {
   if (updatingHarness) return { ok: false, error: '已有 harness 更新任务在进行中' }
   updatingHarness = true
   try {
     const rt = ensureRuntime()
-    // auto-install portable git/pnpm (bundled under <client>/tools) when the
-    // system has none — from-scratch machines need zero prerequisites
-    const tc = await ensureTools(appRoot, process.execPath, (text) => send('dsh:harnessProgress', { step: 'tools', text }))
+    const onStep = (step, text) => send('dsh:harnessProgress', { step, text })
+    // pre-flight: tools must resolve (downloading portable ones when missing)
+    // BEFORE any heavy step, so a broken proxy fails here instead of stalling
+    // deep inside pnpm install
+    let tc
+    try {
+      onStep('tools', '检测构建工具（git / pnpm / node）…')
+      tc = await ensureTools(appRoot, process.execPath, (text) => onStep('tools', text))
+    } catch (err) {
+      onStep('error', `构建工具检测失败：${err.message}。请检查网络/代理后重试；或手动安装 Git、pnpm、Node.js（git-scm.com · pnpm.io · nodejs.org）后重启客户端再更新。`)
+      return { ok: false, error: `构建工具检测失败：${err.message}` }
+    }
     setToolchain(tc)
+    if (!patchesOnly) {
+      const probe = await probeNetwork(tc)
+      if (!probe.ok) {
+        onStep('error', '网络检测失败（npm 镜像与 GitHub 均无响应），已终止更新。请检查系统代理/VPN 是否可用、能否正常访问 github.com，处理好网络后再点「检查并更新」。')
+        return { ok: false, error: '网络检测失败（npm 镜像与 GitHub 均无响应）' }
+      }
+    }
     const patch = materializePatch()
     if (!patch) return { ok: false, error: '补丁文件缺失（patches/sdk-server.patch）' }
     const repoUrl = rt.config.harnessRepo || DEFAULT_REPO
-    const onStep = (step, text) => send('dsh:harnessProgress', { step, text })
     const result = patchesOnly
       ? await applyPatchOnly({ harnessDir: rt.config.harnessDir, patchFile: patch, onStep })
       : await updateHarness({

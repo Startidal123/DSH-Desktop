@@ -672,6 +672,7 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
                   customModels={config.customModels}
                   onSwitch={onSwitchModel}
                   onChanged={onConfigChanged}
+                  dropUp
                 />
               )}
               <button

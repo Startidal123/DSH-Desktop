@@ -281,6 +281,7 @@ export default function SettingsModal({ config, hasApiKey, harnessLines, clientL
                     <input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} />
                     <span>启动时自动检测并应用 harness 更新（含补丁与重建，空闲时静默执行）</span>
                   </label>
+                  <div className="field-hint">默认关闭：网络或代理异常时自动更新可能长时间卡在依赖安装，建议保持手动更新</div>
                 </div>
               </>
             )}

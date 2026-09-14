@@ -19,32 +19,48 @@ function run(cmd, cwd, timeoutMs = 60000) {
   })
 }
 
-/** Stream a download to disk with MB progress reporting. */
+/** Stream a download to disk with MB progress reporting. Fails fast when the
+ *  network stalls (broken proxy: 30s without bytes) or the total exceeds 5 min. */
 async function download(url, dest, onProgress) {
-  const res = await fetch(url, { redirect: 'follow' })
-  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
-  const total = Number(res.headers.get('content-length') ?? 0)
-  const reader = res.body.getReader()
-  const out = createWriteStream(dest)
-  let received = 0
-  let lastReport = 0
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    out.write(value)
-    received += value.length
-    if (received - lastReport >= 5 * 1024 * 1024) {
-      lastReport = received
-      const totalText = total ? ` / ${(total / 1048576).toFixed(0)}MB` : ''
-      onProgress?.(`${(received / 1048576).toFixed(0)}MB${totalText}`)
+  const ctrl = new AbortController()
+  let lastByte = Date.now()
+  const overall = setTimeout(() => ctrl.abort(new Error('下载超时（超过 5 分钟）')), 300000)
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastByte > 30000) ctrl.abort(new Error('下载停滞（30 秒无数据，多为网络/代理不通）'))
+  }, 5000)
+  try {
+    const res = await fetch(url, { redirect: 'follow', signal: ctrl.signal })
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
+    const total = Number(res.headers.get('content-length') ?? 0)
+    const reader = res.body.getReader()
+    const out = createWriteStream(dest)
+    let received = 0
+    let lastReport = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      lastByte = Date.now()
+      out.write(value)
+      received += value.length
+      if (received - lastReport >= 5 * 1024 * 1024) {
+        lastReport = received
+        const totalText = total ? ` / ${(total / 1048576).toFixed(0)}MB` : ''
+        onProgress?.(`${(received / 1048576).toFixed(0)}MB${totalText}`)
+      }
     }
+    await new Promise((r) => out.end(r))
+    if (received < 1024 * 1024) {
+      unlinkSync(dest)
+      throw new Error('下载内容异常（过小）')
+    }
+    return received
+  } catch (err) {
+    try { unlinkSync(dest) } catch { /* nothing written */ }
+    throw err
+  } finally {
+    clearTimeout(overall)
+    clearInterval(watchdog)
   }
-  await new Promise((r) => out.end(r))
-  if (received < 1024 * 1024) {
-    unlinkSync(dest)
-    throw new Error('下载内容异常（过小）')
-  }
-  return received
 }
 
 async function unzip(zipPath, destDir) {
