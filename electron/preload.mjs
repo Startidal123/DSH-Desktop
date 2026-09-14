@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('dsh', {
   listChangePlans: () => ipcRenderer.invoke('dsh:listChangePlans'),
   checkHarnessPatches: () => ipcRenderer.invoke('dsh:checkHarnessPatches'),
   configLocations: () => ipcRenderer.invoke('dsh:configLocations'),
-  openConfigFolder: () => ipcRenderer.invoke('dsh:openConfigFolder'),
+  openConfigFolder: (target) => ipcRenderer.invoke('dsh:openConfigFolder', target),
   winControl: (action) => ipcRenderer.invoke('dsh:winControl', action),
   winIsMaximized: () => ipcRenderer.invoke('dsh:winIsMaximized'),
   onMaximized: (cb) => subscribe('dsh:win-maximized', cb),

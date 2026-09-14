@@ -387,10 +387,17 @@ export default function SettingsModal({ config, hasApiKey, harnessLines, clientL
                   <h4>配置文件</h4>
                   {locs ? (
                     <>
-                      <div className="cfg-row"><span>模型配置</span><code>{locs.settings}</code></div>
-                      <button className="btn ghost cfg-open" onClick={() => window.dsh.openConfigFolder()}>
-                        打开配置文件夹
-                      </button>
+                      <div className="cfg-row"><span>客户端配置</span><code>{locs.settings}</code></div>
+                      <div className="cfg-row"><span>多模态模型目录</span><code>{locs.harnessConfig}</code></div>
+                      <div className="field-hint">图片等多模态模型需在 ~/.dsh/settings.yaml 的 llm-deepseek.models 中登记，条目加 inputModalities: [text, image]；未登记的模型按纯文本处理</div>
+                      <div className="harness-actions">
+                        <button className="btn ghost cfg-open" onClick={() => window.dsh.openConfigFolder()}>
+                          打开客户端配置文件夹
+                        </button>
+                        <button className="btn ghost cfg-open" onClick={() => window.dsh.openConfigFolder('harness')}>
+                          打开 harness 配置文件夹
+                        </button>
+                      </div>
                     </>
                   ) : '读取中…'}
                 </div>

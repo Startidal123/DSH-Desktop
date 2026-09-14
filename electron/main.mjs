@@ -1,7 +1,8 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } from 'electron'
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, renameSync } from 'node:fs'
 import { execSync, exec } from 'node:child_process'
 import { resolve, join, dirname } from 'node:path'
+import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { DshRuntime } from './dsh-runtime.mjs'
 import { DEFAULT_REPO, harnessStatus, updateHarness, applyPatchOnly, setToolchain, probeNetwork } from './harness-update.mjs'
@@ -22,10 +23,10 @@ const DEFAULT_HARNESS_DIR = join(appRoot, 'harness')
 const DEFAULT_WORKSPACE = join(appRoot, 'workspace')
 
 /** `--workspace <dir>` (context-menu launch) overrides the saved workspace. */
-function workspaceFromArgv() {
-  const i = process.argv.indexOf('--workspace')
-  if (i === -1 || i + 1 >= process.argv.length) return ''
-  const v = process.argv[i + 1]
+function workspaceFromArgv(argv = process.argv) {
+  const i = argv.indexOf('--workspace')
+  if (i === -1 || i + 1 >= argv.length) return ''
+  const v = argv[i + 1]
   return v && !v.startsWith('--') ? v : ''
 }
 
@@ -57,20 +58,71 @@ function killOrphanRuntimes() {
 }
 
 const settingsFile = () => resolve(app.getPath('userData'), 'settings.json')
+const settingsBak = () => resolve(app.getPath('userData'), 'settings.json.bak')
 
-function loadSettings() {
-  try {
-    if (existsSync(settingsFile())) return JSON.parse(readFileSync(settingsFile(), 'utf8'))
-  } catch { /* fall through to defaults */ }
-  return {}
+/** Read + parse a settings file. Hand-edited files commonly carry a BOM or
+ *  trailing commas (JSON forbids both) — retry leniently so the edit is
+ *  recovered instead of the config resetting to defaults. Returns
+ *  { data, from } with from describing the source. */
+function readSettingsFile() {
+  for (const [file, from] of [[settingsFile(), 'main'], [settingsBak(), 'bak']]) {
+    try {
+      if (!existsSync(file)) continue
+      const text = readFileSync(file, 'utf8')
+      try {
+        return { data: JSON.parse(text), from }
+      } catch {
+        try {
+          const fixed = JSON.parse(text.replace(/^\uFEFF/, '').replace(/,(\s*[}\]])/g, '$1'))
+          console.warn(`[settings] ${file} 严格 JSON 解析失败，已宽松恢复（BOM/尾逗号容错）`)
+          return { data: fixed, from: `${from}-lenient` }
+        } catch { /* genuinely broken — try the backup */ }
+      }
+    } catch { /* unreadable */ }
+  }
+  return { data: {}, from: null }
 }
 
+function loadSettings() {
+  return readSettingsFile().data
+}
+
+/** Atomic settings write: serialize to a temp file, then rename over the
+ *  target — a truncated settings.json can never exist on disk. The previous
+ *  version rotates into .bak, but only when it is parseable (a broken
+ *  hand-edit goes to .bad for inspection instead of clobbering the good
+ *  backup). */
 function saveSettings(patch) {
-  const next = { ...loadSettings(), ...patch }
+  const { data, from } = readSettingsFile()
+  const next = { ...data, ...patch }
+  const target = settingsFile()
+  const tmp = `${target}.tmp`
   try {
-    writeFileSync(settingsFile(), JSON.stringify(next, null, 2))
+    writeFileSync(tmp, JSON.stringify(next, null, 2))
+    if (existsSync(target)) {
+      if (from === 'main' || from === 'main-lenient') {
+        try { renameSync(target, settingsBak()) } catch { /* absent is fine */ }
+      } else {
+        console.warn(`[settings] settings.json 无法解析，已转存 ${target}.bad 供检查（本次写入基于备份/默认值）`)
+        try { renameSync(target, `${target}.bad`) } catch { /* absent is fine */ }
+      }
+    }
+    renameSync(tmp, target)
   } catch { /* best effort */ }
   return next
+}
+
+/** The freshest on-disk config (hand-edited settings.json survives), with
+ *  critical fields falling back to the runtime's current values. Absorb it
+ *  before applying any patch so fields we are not touching are never
+ *  overwritten with stale in-memory values. */
+function freshDiskConfig(rt) {
+  const disk = { ...(loadSettings().config ?? {}) }
+  if (!disk.harnessDir) disk.harnessDir = rt.config.harnessDir
+  if (!disk.workspace) disk.workspace = rt.config.workspace
+  if (!disk.provider) disk.provider = rt.config.provider
+  if (!disk.model) disk.model = rt.config.model
+  return disk
 }
 
 function send(channel, payload) {
@@ -123,12 +175,17 @@ function ensureRuntime() {
     // empty fields fall back to the portable defaults (fresh copy or cleaned)
     if (!cfg.harnessDir) cfg.harnessDir = DEFAULT_HARNESS_DIR
     if (!cfg.workspace) cfg.workspace = DEFAULT_WORKSPACE
+    const wsChanged = !!argWorkspace && cfg.workspace !== argWorkspace
     if (argWorkspace) cfg.workspace = argWorkspace
     runtime.updateConfig(cfg)
     saveSettings({ config: runtime.config })
+    // context-menu launch into a different workspace focuses a fresh
+    // conversation there — same behavior as switching workspaces in-app
+    if (wsChanged) runtime.focusWorkspaceSession()
   } else if (argWorkspace) {
     runtime.updateConfig({ workspace: argWorkspace })
     saveSettings({ config: runtime.config })
+    runtime.focusWorkspaceSession()
   }
   try { mkdirSync(runtime.config.workspace, { recursive: true }) } catch { /* read-only media */ }
   return runtime
@@ -228,7 +285,38 @@ function createWindow() {
   rt.ensureStarted().catch(() => { /* surfaced via prompt errors */ })
 }
 
+// Single instance: two concurrent processes each hold their own in-memory
+// config and the last writer wins — the stale one silently wipes whatever
+// the other saved (e.g. custom models). The second launch quits instead;
+// a --workspace launch (context menu) is forwarded to the running instance.
+const gotSingleInstance = app.requestSingleInstanceLock()
+if (!gotSingleInstance) {
+  app.quit()
+}
+
+app.on('second-instance', (_e, argv) => {
+  const ws = workspaceFromArgv(argv)
+  if (ws) {
+    ;(async () => {
+      try {
+        const rt = ensureRuntime()
+        if (rt.config.workspace !== ws) {
+          rt.updateConfig({ ...freshDiskConfig(rt), workspace: ws })
+          saveSettings({ config: rt.config })
+          rt.focusWorkspaceSession()
+          if (rt.child) await rt.restart().catch(() => {})
+        }
+      } catch { /* surfaced via runtime status */ }
+    })()
+  }
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore()
+    win.focus()
+  }
+})
+
 app.whenReady().then(() => {
+  if (!gotSingleInstance) return // losing instance: quitting
   killOrphanRuntimes()
   protocol.handle('dshimg', (request) => {
     const name = decodeURIComponent(request.url.replace(/^dshimg:\/\//, ''))
@@ -564,11 +652,21 @@ ipcMain.handle('dsh:configLocations', () => {
     attachments: attachmentsDir(),
     crashLog: resolve(userData, 'crash.log'),
     folder: userData,
+    // harness global config — the llm-deepseek model catalog where image
+    // (multimodal) models are declared via inputModalities
+    harnessConfig: resolve(homedir(), '.dsh', 'settings.yaml'),
+    harnessConfigDir: resolve(homedir(), '.dsh'),
   }
 })
 
-ipcMain.handle('dsh:openConfigFolder', () => {
-  shell.openPath(app.getPath('userData'))
+ipcMain.handle('dsh:openConfigFolder', (_e, target) => {
+  if (target === 'harness') {
+    const dir = resolve(homedir(), '.dsh')
+    mkdirSync(dir, { recursive: true })
+    shell.openPath(dir)
+  } else {
+    shell.openPath(app.getPath('userData'))
+  }
   return { ok: true }
 })
 
@@ -708,7 +806,7 @@ ipcMain.handle('dsh:updateConfig', async (_e, partial) => {
   } else if (patch.provider === 'deepseek-official') {
     patch.activeCustom = ''
   }
-  rt.updateConfig(patch)
+  rt.updateConfig({ ...freshDiskConfig(rt), ...patch })
   saveSettings({ config: rt.config })
   if (typeof patch.workspace === 'string' && patch.workspace && oldConfig.workspace !== rt.config.workspace) {
     rt.focusWorkspaceSession()
@@ -734,7 +832,8 @@ ipcMain.handle('dsh:addCustomModel', async (_e, entry) => {
   if (!baseURL || !model) return { ok: false, error: 'baseURL 和模型 ID 必填' }
   const maxTokens = Number(entry?.maxTokens)
   const rt = ensureRuntime()
-  const list = Array.isArray(rt.config.customModels) ? [...rt.config.customModels] : []
+  const disk = freshDiskConfig(rt)
+  const list = Array.isArray(disk.customModels) ? [...disk.customModels] : []
   const item = {
     label: label || model,
     baseURL,
@@ -744,22 +843,23 @@ ipcMain.handle('dsh:addCustomModel', async (_e, entry) => {
     ...(Number.isInteger(maxTokens) && maxTokens > 0 ? { maxTokens } : {}),
   }
   list.push(item)
-  rt.updateConfig({ customModels: list })
+  rt.updateConfig({ ...disk, customModels: list })
   saveSettings({ config: rt.config })
   return { ok: true, item }
 })
 
 ipcMain.handle('dsh:removeCustomModel', async (_e, provider) => {
   const rt = ensureRuntime()
-  const list = (Array.isArray(rt.config.customModels) ? rt.config.customModels : [])
+  const disk = freshDiskConfig(rt)
+  const list = (Array.isArray(disk.customModels) ? disk.customModels : [])
     .filter(m => m.provider !== provider)
   const patch = { customModels: list }
-  if (rt.config.activeCustom === provider) {
+  if (disk.activeCustom === provider) {
     patch.activeCustom = ''
     patch.provider = 'deepseek-official'
     patch.model = 'deepseek-v4-flash'
   }
-  rt.updateConfig(patch)
+  rt.updateConfig({ ...disk, ...patch })
   saveSettings({ config: rt.config })
   if (patch.activeCustom === '' && rt.child) {
     try { await rt.restart() } catch { /* surfaced via runtime status */ }
