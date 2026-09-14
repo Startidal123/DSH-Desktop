@@ -521,6 +521,7 @@ ipcMain.handle('dsh:applyHarnessPatches', async () => {
   // manual invocation means "repair": force a full reinstall+rebuild instead
   // of letting a matching build stamp skip the work
   const rt = ensureRuntime()
+  moduleNotFoundRepaired = false
   try { rmSync(join(rt.config.harnessDir, '.dsh-build-stamp'), { force: true }) } catch { /* absent */ }
   return runHarnessPipeline({ patchesOnly: true })
 })
@@ -655,6 +656,7 @@ ipcMain.handle('dsh:decideApproval', async (_e, approvalId, outcome) => {
 
 ipcMain.handle('dsh:restart', async () => {
   const rt = ensureRuntime()
+  moduleNotFoundRepaired = false
   try {
     await rt.restart()
     return { ok: true }
