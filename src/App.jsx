@@ -26,6 +26,14 @@ export default function App() {
   const [harnessLines, setHarnessLines] = useState([])
   const [clientLines, setClientLines] = useState([])
   const [toolLines, setToolLines] = useState([])
+
+  // each update run starts with a fresh log — stale lines from previous
+  // runs must not pile up across clicks
+  const clearProgress = useCallback((which) => {
+    if (which === 'harness') setHarnessLines([])
+    else if (which === 'client') setClientLines([])
+    else if (which === 'tools') setToolLines([])
+  }, [])
   const [updateBadge, setUpdateBadge] = useState(false)
   const [maximized, setMaximized] = useState(false)
   const [statsOpen, setStatsOpen] = useState(() => localStorage.getItem('dsh-stats-open') !== 'false')
@@ -260,6 +268,7 @@ export default function App() {
           harnessLines={harnessLines}
           clientLines={clientLines}
           toolLines={toolLines}
+          onClearProgress={clearProgress}
           onClose={() => setShowSettings(false)}
           onSave={saveConfig}
           onPickWorkspace={() => window.dsh.pickWorkspace()}

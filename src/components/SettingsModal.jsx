@@ -29,7 +29,7 @@ function ProgressLog({ lines }) {
   return <pre className="harness-log">{lines.join('\n')}</pre>
 }
 
-function ClientUpdateSection({ lines }) {
+function ClientUpdateSection({ lines, onClear }) {
   const status = usePipelineStatus(
     () => window.dsh.clientStatus(),
     lines,
@@ -47,6 +47,7 @@ function ClientUpdateSection({ lines }) {
 
   const act = async () => {
     if (running) return
+    onClear?.()
     setRunning(true)
     const res = await window.dsh.clientUpdate()
     if (!res.ok) setRunning(false)
@@ -81,7 +82,7 @@ function ClientUpdateSection({ lines }) {
   )
 }
 
-function HarnessUpdateSection({ lines }) {
+function HarnessUpdateSection({ lines, onClear }) {
   const status = usePipelineStatus(
     () => window.dsh.harnessStatus(),
     lines,
@@ -98,6 +99,7 @@ function HarnessUpdateSection({ lines }) {
 
   const act = async (fn) => {
     if (running) return
+    onClear?.()
     setRunning(true)
     const res = await fn()
     if (!res.ok) setRunning(false)
@@ -165,7 +167,7 @@ function ToolCard({ name, info, busy, onInstall, onStop }) {
   )
 }
 
-function ToolsSection({ lines }) {
+function ToolsSection({ lines, onClear }) {
   const [status, setStatus] = useState(null)
   const [running, setRunning] = useState(false)
   const refresh = () => window.dsh.toolchainStatus().then(setStatus).catch(() => setStatus(null))
@@ -180,6 +182,7 @@ function ToolsSection({ lines }) {
 
   const install = async (name) => {
     if (running) return
+    onClear?.()
     setRunning(true)
     const res = await window.dsh.installTool(name)
     if (!res.ok) setRunning(false)
@@ -242,7 +245,7 @@ function ContextMenuToggle() {
   )
 }
 
-export default function SettingsModal({ config, hasApiKey, harnessLines, clientLines, toolLines, onClose, onSave, onPickWorkspace }) {
+export default function SettingsModal({ config, hasApiKey, harnessLines, clientLines, toolLines, onClearProgress, onClose, onSave, onPickWorkspace }) {
   const [tab, setTab] = useState('general')
   const [saving, setSaving] = useState(false)
   const [workspace, setWorkspace] = useState(config.workspace ?? '')
@@ -356,12 +359,12 @@ export default function SettingsModal({ config, hasApiKey, harnessLines, clientL
               </>
             )}
 
-            {tab === 'tools' && <ToolsSection lines={toolLines} />}
+            {tab === 'tools' && <ToolsSection lines={toolLines} onClear={() => onClearProgress?.('tools')} />}
 
             {tab === 'update' && (
               <>
-                <ClientUpdateSection lines={clientLines} />
-                <HarnessUpdateSection lines={harnessLines} />
+                <ClientUpdateSection lines={clientLines} onClear={() => onClearProgress?.('client')} />
+                <HarnessUpdateSection lines={harnessLines} onClear={() => onClearProgress?.('harness')} />
                 <div className="harness-section">
                   <h4>仓库信息</h4>
                   <div className="cfg-row">
