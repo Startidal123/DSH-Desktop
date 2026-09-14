@@ -53,7 +53,7 @@ function ClientUpdateSection({ lines }) {
   }
 
   const forceStop = async () => {
-    await window.dsh.resetUpdateTasks().catch(() => {})
+    await window.dsh.resetUpdateTasks('client').catch(() => {})
     setRunning(false)
   }
 
@@ -103,7 +103,7 @@ function HarnessUpdateSection({ lines }) {
   }
 
   const forceStop = async () => {
-    await window.dsh.resetUpdateTasks().catch(() => {})
+    await window.dsh.resetUpdateTasks('harness').catch(() => {})
     setRunning(false)
   }
 
@@ -170,8 +170,6 @@ export default function SettingsModal({ config, hasApiKey, harnessLines, clientL
   const [saving, setSaving] = useState(false)
   const [workspace, setWorkspace] = useState(config.workspace ?? '')
   const [harnessDir, setHarnessDir] = useState(config.harnessDir ?? '')
-  const [repo, setRepo] = useState(config.harnessRepo ?? '')
-  const [auto, setAuto] = useState(config.harnessAutoUpdate === true)
   const [locs, setLocs] = useState(null)
   const [dsApiKey, setDsApiKey] = useState(config.dsApiKey ?? '')
   const [dsBaseUrl, setDsBaseUrl] = useState(config.dsBaseUrl ?? '')
@@ -186,8 +184,6 @@ export default function SettingsModal({ config, hasApiKey, harnessLines, clientL
     await onSave({
       workspace,
       harnessDir,
-      harnessRepo: repo.trim(),
-      harnessAutoUpdate: auto,
       dsApiKey: dsApiKey.trim(),
       dsBaseUrl: dsBaseUrl.trim(),
     })
@@ -288,16 +284,12 @@ export default function SettingsModal({ config, hasApiKey, harnessLines, clientL
                 <ClientUpdateSection lines={clientLines} />
                 <HarnessUpdateSection lines={harnessLines} />
                 <div className="harness-section">
-                  <h4>自动更新</h4>
-                  <label className="field">
-                    <span>发布仓库地址（GitHub，网络不通时自动走镜像加速）</span>
-                    <input value={repo} onChange={e => setRepo(e.target.value)} placeholder="https://github.com/<你>/DSH-Desktop" />
-                  </label>
-                  <label className="checkbox-field">
-                    <input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} />
-                    <span>启动时自动检测并应用 harness 更新（含补丁与重建，空闲时静默执行）</span>
-                  </label>
-                  <div className="field-hint">默认关闭：网络或代理异常时自动更新可能长时间卡在依赖安装，建议保持手动更新</div>
+                  <h4>仓库信息</h4>
+                  <div className="cfg-row">
+                    <span>Harness 源码仓库</span>
+                    <code>{config.harnessRepo || 'https://github.com/deepseek-ai/deepseek-harness'}</code>
+                  </div>
+                  <div className="field-hint">更新时自动走镜像加速；地址不可修改（如需自定义请编辑 settings.json 中的 harnessRepo）</div>
                 </div>
               </>
             )}

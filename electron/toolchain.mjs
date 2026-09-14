@@ -9,22 +9,22 @@ import { trackChild, trackAborter, untrackAborter } from './proc-registry.mjs'
 const MINGIT_URL = 'https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/MinGit-2.47.1-64-bit.zip'
 const PNPM_META = 'https://registry.npmmirror.com/@pnpm/win-x64/latest'
 
-function run(cmd, cwd, timeoutMs = 60000) {
+function run(cmd, cwd, timeoutMs = 60000, tag = 'shared') {
   return new Promise((done) => {
     trackChild(exec(cmd, {
       cwd, encoding: 'utf8', timeout: timeoutMs, windowsHide: true,
       maxBuffer: 16 * 1024 * 1024,
     }, (err, stdout, stderr) => {
       done({ ok: !err, out: (stdout || '').trim(), err: ((stderr || '').trim() || (err?.message ?? '')).slice(0, 300) })
-    }))
+    }), tag)
   })
 }
 
 /** Stream a download to disk with MB progress reporting. Fails fast when the
  *  network stalls (broken proxy: 30s without bytes) or the total exceeds 5 min. */
-async function download(url, dest, onProgress) {
+async function download(url, dest, onProgress, tag = 'shared') {
   const ctrl = new AbortController()
-  trackAborter(ctrl)
+  trackAborter(ctrl, tag)
   let lastByte = Date.now()
   const overall = setTimeout(() => ctrl.abort(new Error('下载超时（超过 5 分钟）')), 300000)
   const watchdog = setInterval(() => {
@@ -66,23 +66,23 @@ async function download(url, dest, onProgress) {
   }
 }
 
-async function unzip(zipPath, destDir) {
-  const res = await run(`powershell -NoProfile -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${destDir}' -Force"`, dirname(destDir), 300000)
+async function unzip(zipPath, destDir, tag = 'shared') {
+  const res = await run(`powershell -NoProfile -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${destDir}' -Force"`, dirname(destDir), 300000, tag)
   if (!res.ok) throw new Error('解压失败：' + res.err)
 }
 
 const hasCmd = async (cmd) => (await run(`"${cmd}" --version`, process.cwd(), 15000)).ok
 
 /** Install a portable MinGit under tools/. */
-async function installGit(toolsDir, onStep) {
+async function installGit(toolsDir, onStep, tag) {
   const gitRoot = join(toolsDir, 'git')
   for (const url of [MINGIT_URL, `https://ghfast.top/${MINGIT_URL}`]) {
     const tmp = join(toolsDir, 'mingit.zip')
     try {
       onStep?.(`下载便携版 git（${url.includes('ghfast.top') ? '镜像' : '直连'}，约 45MB）…`)
-      await download(url, tmp, p => onStep?.(`下载 git… ${p}`))
+      await download(url, tmp, p => onStep?.(`下载 git… ${p}`), tag)
       onStep?.('解压 git…')
-      await unzip(tmp, gitRoot)
+      await unzip(tmp, gitRoot, tag)
       unlinkSync(tmp)
       if (existsSync(join(gitRoot, 'cmd', 'git.exe'))) return join(gitRoot, 'cmd', 'git.exe')
     } catch { /* try the mirror */ }
@@ -91,7 +91,7 @@ async function installGit(toolsDir, onStep) {
 }
 
 /** Install standalone pnpm.exe (bundles its own Node) under tools/. */
-async function installPnpm(toolsDir, onStep) {
+async function installPnpm(toolsDir, onStep, tag) {
   const dest = join(toolsDir, 'pnpm.exe')
   const meta = await fetch(PNPM_META, { redirect: 'follow' }).then(r => r.json()).catch(() => null)
   const tarball = meta?.dist?.tarball
@@ -99,15 +99,15 @@ async function installPnpm(toolsDir, onStep) {
   const tmpTgz = join(toolsDir, 'pnpm.tgz')
   const tmpDir = join(toolsDir, 'pnpm-tmp')
   onStep?.('下载独立版 pnpm（约 80MB，走国内镜像）…')
-  await download(tarball, tmpTgz, p => onStep?.(`下载 pnpm… ${p}`))
+  await download(tarball, tmpTgz, p => onStep?.(`下载 pnpm… ${p}`), tag)
   mkdirSync(tmpDir, { recursive: true })
-  const extract = await run(`tar -xzf "${tmpTgz}" -C "${tmpDir}"`, toolsDir, 300000)
+  const extract = await run(`tar -xzf "${tmpTgz}" -C "${tmpDir}"`, toolsDir, 300000, tag)
   unlinkSync(tmpTgz)
   if (!extract.ok) throw new Error('解压 pnpm 失败：' + extract.err)
   const inner = join(tmpDir, 'package', 'pnpm.exe')
   if (!existsSync(inner)) throw new Error('pnpm 包结构异常')
   // move via copy-free rename within the same volume
-  const move = await run(`move /Y "${inner}" "${dest}"`, toolsDir, 30000)
+  const move = await run(`move /Y "${inner}" "${dest}"`, toolsDir, 30000, tag)
   rmSync(tmpDir, { recursive: true, force: true })
   if (!move.ok && !existsSync(dest)) throw new Error('安装 pnpm 失败：' + move.err)
   return dest
@@ -134,7 +134,7 @@ let ensuring = null
  * Resolve the toolchain, downloading portable pieces on first need.
  * Returns { git, pnpm, env } where env must be merged into every pnpm call.
  */
-export function ensureTools(appRoot, electronExe, onStep) {
+export function ensureTools(appRoot, electronExe, onStep, tag = 'shared') {
   if (ensuring) return ensuring
   ensuring = (async () => {
     const toolsDir = join(appRoot, 'tools')
@@ -143,13 +143,13 @@ export function ensureTools(appRoot, electronExe, onStep) {
     let git = 'git'
     if (!(await hasCmd(git))) {
       const bundled = join(toolsDir, 'git', 'cmd', 'git.exe')
-      git = existsSync(bundled) ? bundled : await installGit(toolsDir, onStep)
+      git = existsSync(bundled) ? bundled : await installGit(toolsDir, onStep, tag)
     }
 
     let pnpm = 'pnpm'
     if (!(await hasCmd(pnpm))) {
       const bundled = join(toolsDir, 'pnpm.exe')
-      pnpm = existsSync(bundled) ? bundled : await installPnpm(toolsDir, onStep)
+      pnpm = existsSync(bundled) ? bundled : await installPnpm(toolsDir, onStep, tag)
     }
 
     const env = {}

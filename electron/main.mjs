@@ -238,10 +238,11 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(resolve(attachmentsDir(), name)).toString())
   })
   createWindow()
-  // silent self-update: wait for idle (no running agent), then fetch+compare;
-  // patch/build only when something actually changed
+  // silent client-version check (badge only; the user applies updates from
+  // 设置 → 更新). Harness updates are strictly manual — silent patch+build
+  // pipelines proved too fragile on flaky networks.
   const savedCfg = loadSettings().config ?? {}
-  if (savedCfg.clientAutoUpdate !== false || savedCfg.harnessAutoUpdate === true) {
+  if (savedCfg.clientAutoUpdate !== false) {
     setTimeout(() => scheduleSilentUpdate(), 8000)
   }
   app.on('activate', () => {
@@ -268,7 +269,7 @@ function handleRuntimeDeath(info) {
         const rt = ensureRuntime()
         try { rmSync(join(rt.config.harnessDir, '.dsh-build-stamp'), { force: true }) } catch { /* absent */ }
         send('dsh:harnessProgress', { step: 'repair', text: '运行时依赖损坏（模块缺失），自动重装依赖并重建 harness…' })
-        const res = await runHarnessPipeline({ patchesOnly: true, silent: true })
+        const res = await runHarnessPipeline({ patchesOnly: true })
         if (res.ok) reconnectAttempt = 0
         else scheduleReconnect()
       } catch {
@@ -292,13 +293,13 @@ function scheduleSilentUpdate(attempt = 0) {
   silentSelfUpdate().catch(e => console.log('[silent-update] error', e?.message ?? e))
 }
 
-/** Client payload first (seconds), then harness (heavier) when enabled. */
+/** Detect-only client version check: notify the renderer (badge on the
+ *  settings button) when a newer payload exists; the user applies it from
+ *  设置 → 更新. */
 async function silentSelfUpdate() {
   const cfg = ensureRuntime().config
   if (cfg.clientAutoUpdate !== false && cfg.clientUpdateRepo) {
-    // detect-only: if a new version exists, notify the renderer (badge on
-    // the settings button); the user applies it from 设置 → 更新
-    const tc = await ensureTools(appRoot, process.execPath, () => {})
+    const tc = await ensureTools(appRoot, process.execPath, () => {}, 'client')
     const { remoteHead } = await import('./client-update.mjs')
     const { clientStatus } = await import('./client-update.mjs')
     const remote = await remoteHead(cfg.clientUpdateRepo, tc.git)
@@ -310,37 +311,33 @@ async function silentSelfUpdate() {
       })
     }
   }
-  if (cfg.harnessAutoUpdate === true) {
-    await runHarnessPipeline({ silent: true })
-  }
 }
 
-/** Bumped by the force-reset IPC; pipelines capture it at start and abort at
- *  the next step boundary (onStep) when it moves — so a stuck task can be
- *  killed and re-launched without restarting the client. */
-let updateGen = 0
+/** Bumped by the force-reset IPC (per pipeline); pipelines capture their own
+ *  counter at start and abort at the next step boundary (onStep) when it
+ *  moves — so a stuck task can be killed and re-launched without restarting
+ *  the client, and stopping one pipeline leaves the other untouched. */
+let clientGen = 0
+let harnessGen = 0
 
 let updatingClient = false
 
-async function runClientUpdate({ silent = false } = {}) {
+async function runClientUpdate() {
   if (updatingClient) return { ok: false, error: '已有客户端更新任务在进行中' }
   if (!app.isPackaged) return { ok: true, updated: false, devMode: true }
   updatingClient = true
-  const myGen = updateGen
+  const myGen = clientGen
   try {
     const rt = ensureRuntime()
-    // a commit blacklisted by loader rollback is never retried silently; a
-    // manual run clears the blacklist so the user can force another attempt
+    // a manual run clears the loader's rollback blacklist so the user can
+    // force another attempt at a commit that once failed to boot
     const badFile = join(app.getPath('userData'), 'client-bad-commit')
     const badCommit = existsSync(badFile) ? readFileSync(badFile, 'utf8').trim() : ''
-    if (badCommit && !silent) {
+    if (badCommit) {
       try { rmSync(badFile, { force: true }) } catch { /* best effort */ }
     }
-    if (badCommit && silent) {
-      return { ok: true, updated: false, blocked: badCommit }
-    }
     // reuse the resolved (possibly bundled) git
-    const tc = await ensureTools(appRoot, process.execPath, () => {})
+    const tc = await ensureTools(appRoot, process.execPath, () => {}, 'client')
     const res = await clientUpdate({
       appDir: app.getAppPath(),
       repoUrl: rt.config.clientUpdateRepo,
@@ -348,7 +345,7 @@ async function runClientUpdate({ silent = false } = {}) {
       userDataDir: app.getPath('userData'),
       ...(badCommit ? { skipCommit: badCommit } : {}),
       onStep: (step, text) => {
-        if (myGen !== updateGen) throw new Error('更新任务已被强制终止')
+        if (myGen !== clientGen) throw new Error('更新任务已被强制终止')
         send('dsh:clientProgress', { step, text })
       },
     })
@@ -428,14 +425,14 @@ function materializePatch() {
 
 let updatingHarness = false
 
-async function runHarnessPipeline({ patchesOnly = false, silent = false } = {}) {
+async function runHarnessPipeline({ patchesOnly = false } = {}) {
   if (updatingHarness) return { ok: false, error: '已有 harness 更新任务在进行中' }
   updatingHarness = true
-  const myGen = updateGen
+  const myGen = harnessGen
   try {
     const rt = ensureRuntime()
     const onStep = (step, text) => {
-      if (myGen !== updateGen) throw new Error('更新任务已被强制终止')
+      if (myGen !== harnessGen) throw new Error('更新任务已被强制终止')
       send('dsh:harnessProgress', { step, text })
     }
     // pre-flight: tools must resolve (downloading portable ones when missing)
@@ -444,7 +441,7 @@ async function runHarnessPipeline({ patchesOnly = false, silent = false } = {}) 
     let tc
     try {
       onStep('tools', '检测构建工具（git / pnpm / node）…')
-      tc = await ensureTools(appRoot, process.execPath, (text) => onStep('tools', text))
+      tc = await ensureTools(appRoot, process.execPath, (text) => onStep('tools', text), 'harness')
     } catch (err) {
       onStep('error', `构建工具检测失败：${err.message}。请检查网络/代理后重试；或手动安装 Git、pnpm、Node.js（git-scm.com · pnpm.io · nodejs.org）后重启客户端再更新。`)
       return { ok: false, error: `构建工具检测失败：${err.message}` }
@@ -501,18 +498,28 @@ ipcMain.handle('dsh:harnessStatus', async () => {
   return { ...status, tools, busy: updatingHarness }
 })
 
-/** Force-clear stuck update tasks: tree-kill pipeline children, abort
- *  downloads, release the busy flags and invalidate running pipelines (they
- *  abort at their next step boundary). Lets the user re-launch an update
- *  without restarting the client. */
-ipcMain.handle('dsh:resetUpdateTasks', () => {
-  const killed = killAll()
-  updateGen += 1
-  updatingHarness = false
-  updatingClient = false
-  const text = `已强制终止更新任务${killed ? `（结束 ${killed} 个子进程）` : ''}，可重新点击更新按钮`
-  send('dsh:harnessProgress', { step: 'error', text })
-  send('dsh:clientProgress', { step: 'error', text })
+/** Force-clear a stuck update task, scoped to one pipeline ('client' |
+ *  'harness'): tree-kill that pipeline's children, abort its downloads,
+ *  release its busy flag and invalidate it at the next step boundary —
+ *  without disturbing the other pipeline. Lets the user re-launch the
+ *  update without restarting the client. */
+ipcMain.handle('dsh:resetUpdateTasks', (_e, target) => {
+  const scope = target === 'client' || target === 'harness' ? target : 'all'
+  let killed = 0
+  if (scope === 'client' || scope === 'all') {
+    killed += killAll('client')
+    clientGen += 1
+    updatingClient = false
+  }
+  if (scope === 'harness' || scope === 'all') {
+    killed += killAll('harness')
+    harnessGen += 1
+    updatingHarness = false
+  }
+  const label = scope === 'client' ? '客户端更新任务' : scope === 'harness' ? 'harness 更新任务' : '更新任务'
+  const text = `已强制终止${label}${killed ? `（结束 ${killed} 个子进程/下载）` : ''}，可重新点击更新按钮`
+  if (scope === 'client' || scope === 'all') send('dsh:clientProgress', { step: 'error', text })
+  if (scope === 'harness' || scope === 'all') send('dsh:harnessProgress', { step: 'error', text })
   return { ok: true, killed }
 })
 

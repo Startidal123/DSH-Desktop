@@ -18,7 +18,7 @@ function run(cmd, cwd, timeoutMs = 120000) {
       maxBuffer: 16 * 1024 * 1024,
     }, (err, stdout, stderr) => {
       done({ ok: !err, out: (stdout || '').trim(), err: ((stderr || '').trim() || (err?.message ?? '')).slice(0, 400) })
-    }))
+    }), 'client')
   })
 }
 

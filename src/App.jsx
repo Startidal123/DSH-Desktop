@@ -122,7 +122,7 @@ export default function App() {
 
   const saveConfig = useCallback(async draft => {
     const res = await window.dsh.updateConfig(draft)
-    setConfig(draft)
+    setConfig(c => ({ ...c, ...draft }))
     if (!res.ok) setError(res.error)
   }, [])
 

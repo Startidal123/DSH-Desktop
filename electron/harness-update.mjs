@@ -26,7 +26,7 @@ function run(cmd, cwd, timeoutMs = 60000) {
       env: { ...process.env, ...toolchain.env },
     }, (err, stdout, stderr) => {
       done({ ok: !err, out: (stdout || '').trim(), err: ((stderr || '').trim() || (err?.message ?? '')).slice(0, 500) })
-    }))
+    }), 'harness')
   })
 }
 
@@ -138,7 +138,7 @@ function runStreaming(cmd, cwd, timeoutMs, onLine) {
     const child = trackChild(spawn(resolved, {
       cwd, shell: true, windowsHide: true,
       env: { ...process.env, ...toolchain.env },
-    }))
+    }), 'harness')
     let pending = ''
     let tail = ''
     let lastEmit = 0
