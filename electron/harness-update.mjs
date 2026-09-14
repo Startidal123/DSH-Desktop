@@ -1,4 +1,4 @@
-import { exec } from 'node:child_process'
+import { exec, spawn } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { resolve, dirname } from 'node:path'
@@ -126,20 +126,82 @@ async function buildUpToDate(harnessDir, patchFile) {
   }
 }
 
+/** Long-running build command with live output: streams lines to onLine
+ *  (rate-limited) so the progress log shows liveness, and tree-kills the
+ *  whole process on timeout — plain exec only kills the shell, leaving pnpm
+ *  grandchildren alive and locking the store for the retry. */
+function runStreaming(cmd, cwd, timeoutMs, onLine) {
+  const resolved = cmd
+    .replace(/^git /, `"${toolchain.git}" `)
+    .replace(/^pnpm /, `"${toolchain.pnpm}" `)
+  return new Promise((resolve) => {
+    const child = trackChild(spawn(resolved, {
+      cwd, shell: true, windowsHide: true,
+      env: { ...process.env, ...toolchain.env },
+    }))
+    let pending = ''
+    let tail = ''
+    let lastEmit = 0
+    let timedOut = false
+    const feed = (chunk) => {
+      pending += chunk
+      const parts = pending.split(/[\r\n]+/)
+      pending = parts.pop() ?? ''
+      for (const line of parts) {
+        const text = line.trim()
+        if (!text) continue
+        tail = text
+        const now = Date.now()
+        if (now - lastEmit >= 1500) {
+          lastEmit = now
+          try { onLine?.(text.slice(0, 200)) } catch { /* force-stopped mid-stream */ }
+        }
+      }
+    }
+    child.stdout?.on('data', feed)
+    child.stderr?.on('data', feed)
+    const timer = setTimeout(() => {
+      timedOut = true
+      if (child.pid) {
+        if (process.platform === 'win32') {
+          exec(`taskkill /T /F /PID ${child.pid}`, { windowsHide: true }, () => { /* best effort */ })
+        } else {
+          try { child.kill('SIGKILL') } catch { /* already gone */ }
+        }
+      }
+    }, timeoutMs)
+    child.once('error', (err) => {
+      clearTimeout(timer)
+      resolve({ ok: false, err: String(err.message ?? err) })
+    })
+    child.once('exit', (code) => {
+      clearTimeout(timer)
+      resolve({
+        ok: !timedOut && code === 0,
+        err: timedOut ? '超时（进程树已强制结束）' : (tail || `exit=${code}`),
+      })
+    })
+  })
+}
+
 async function installAndBuild(harnessDir, patchFile, onStep) {
   if (await buildUpToDate(harnessDir, patchFile)) {
     onStep?.('build', '源码与补丁均未变化，跳过安装与构建')
     return
   }
-  onStep?.('install', '安装依赖（pnpm install）…')
+  onStep?.('install', '安装依赖（pnpm install，走国内镜像，冷缓存首次可能较久）…')
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const install = await run('pnpm install --prefer-offline', harnessDir, 300000)
+    const install = await runStreaming(
+      'pnpm install --prefer-offline --registry=https://registry.npmmirror.com',
+      harnessDir, 900000,
+      (line) => onStep?.('install', line),
+    )
     if (install.ok) break
     if (attempt === 2) throw new Error('依赖安装失败（多为网络/代理不通）：' + install.err + '。请检查系统代理/网络后重试，或手动在 harness 目录执行 pnpm install 排查。')
-    onStep?.('install', '安装超时/失败，重试一次…')
+    onStep?.('install', '安装未完成，重试一次…')
   }
   onStep?.('build', '构建 harness（约 2 分钟，请勿关闭客户端）…')
-  const build = await run('pnpm run build', harnessDir, 600000)
+  const build = await runStreaming('pnpm run build', harnessDir, 600000, (line) => onStep?.('build', line))
   if (!build.ok) throw new Error('构建失败：' + build.err)
   // stamp the successful build so unchanged trees skip this next time
   try {
