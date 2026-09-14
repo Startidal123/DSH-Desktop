@@ -218,23 +218,6 @@ export async function applyPatchOnly({ harnessDir, patchFile, onStep }) {
   await installAndBuild(harnessDir, patchFile, onStep)
 }
 
-/** Verify the external toolchain the pipeline shells out to. */
-export async function checkToolchain() {
-  // legacy probe kept for the settings status line; the pipeline itself now
-  // auto-installs portable pieces via ensureTools instead of failing here
-  const tools = [
-    { cmd: 'git --version', name: 'git' },
-    { cmd: 'node --version', name: 'Node.js 22+' },
-    { cmd: 'pnpm --version', name: 'pnpm' },
-  ]
-  const missing = []
-  for (const t of tools) {
-    const res = await run(t.cmd, process.cwd(), 20000)
-    if (!res.ok) missing.push(`${t.name}（将自动下载便携版）`)
-  }
-  return { ok: missing.length === 0, missing }
-}
-
 /** Clone the repo from scratch (fresh machine / deleted checkout). */
 async function cloneHarness({ harnessDir, repoUrl, onStep }) {
   if (existsSync(harnessDir) && readdirSync(harnessDir).length > 0) {

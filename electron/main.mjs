@@ -5,7 +5,7 @@ import { resolve, join, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DshRuntime } from './dsh-runtime.mjs'
 import { DEFAULT_REPO, harnessStatus, updateHarness, applyPatchOnly, setToolchain, probeNetwork } from './harness-update.mjs'
-import { ensureTools, toolchainStatus, installTool } from './toolchain.mjs'
+import { resolveTools, toolchainStatus, installTool } from './toolchain.mjs'
 import { clientStatus, clientUpdate } from './client-update.mjs'
 import { killAll } from './proc-registry.mjs'
 
@@ -299,7 +299,7 @@ function scheduleSilentUpdate(attempt = 0) {
 async function silentSelfUpdate() {
   const cfg = ensureRuntime().config
   if (cfg.clientAutoUpdate !== false && cfg.clientUpdateRepo) {
-    const tc = await ensureTools(appRoot, process.execPath, () => {}, 'client')
+    const tc = await resolveTools(appRoot)
     const { remoteHead } = await import('./client-update.mjs')
     const { clientStatus } = await import('./client-update.mjs')
     const remote = await remoteHead(cfg.clientUpdateRepo, tc.git)
@@ -338,7 +338,7 @@ async function runClientUpdate() {
       try { rmSync(badFile, { force: true }) } catch { /* best effort */ }
     }
     // reuse the resolved (possibly bundled) git
-    const tc = await ensureTools(appRoot, process.execPath, () => {}, 'client')
+    const tc = await resolveTools(appRoot)
     const res = await clientUpdate({
       appDir: app.getAppPath(),
       repoUrl: rt.config.clientUpdateRepo,
@@ -436,18 +436,10 @@ async function runHarnessPipeline({ patchesOnly = false } = {}) {
       if (myGen !== harnessGen) throw new Error('更新任务已被强制终止')
       send('dsh:harnessProgress', { step, text })
     }
-    // pre-flight: tools must resolve (downloading portable ones when missing)
-    // BEFORE any heavy step, so a broken proxy fails here instead of stalling
-    // deep inside pnpm install
-    let tc
-    try {
-      onStep('tools', '检测构建工具（git / pnpm / node）…')
-      tc = await ensureTools(appRoot, process.execPath, (text) => onStep('tools', text), 'harness')
-    } catch (err) {
-      onStep('error', `构建工具检测失败：${err.message}。请检查网络/代理后重试；或手动安装 Git、pnpm、Node.js（git-scm.com · pnpm.io · nodejs.org）后重启客户端再更新。`)
-      return { ok: false, error: `构建工具检测失败：${err.message}` }
-    }
-    setToolchain(tc)
+    // tools are managed solely by the settings 工具页 — the pipeline only
+    // RESOLVES them (system command wins, bundled copy otherwise); missing
+    // tools throw with guidance to 设置 → 工具
+    setToolchain(await resolveTools(appRoot))
     const patch = materializePatch()
     if (!patch) return { ok: false, error: '补丁文件缺失（patches/sdk-server.patch）' }
     const repoUrl = rt.config.harnessRepo || DEFAULT_REPO

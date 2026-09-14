@@ -48,11 +48,11 @@
 | 文件 | 职责 |
 |---|---|
 | `loader.mjs` | **打包版启动入口**（package.json main）：三标记回滚状态机——`client-boot-attempt` / `client-boot-ok`；回滚判据 = 同 commit 尝试过且从未 ready；import main.mjs 抛错 → 黑名单+回滚+relaunch。**必须保持极简** |
-| `main.mjs` | 窗口与 IPC 中枢：自绘窗口按钮（`titleBarStyle: 'hidden'` 无 overlay + winControl IPC）；`handleRuntimeDeath`（ERR_MODULE_NOT_FOUND → 清构建戳自动重装重建，一次性守卫、手动重启/重装会重置；其余指数退避重连×5）；`runHarnessPipeline`（**仅手动触发**，无静默自动更新）；`runClientUpdate` / `silentSelfUpdate`（仅检测新版本 → 设置按钮徽标，用户手动应用）；`dsh:resetUpdateTasks(target)` 按管线强制终止；右键菜单注册（HKCU，`--workspace "%V"`）；`appRoot` 解析（dev=项目目录，打包=exe 目录） |
+| `main.mjs` | 窗口与 IPC 中枢：自绘窗口按钮（`titleBarStyle: 'hidden'` 无 overlay + winControl IPC）；`handleRuntimeDeath`（ERR_MODULE_NOT_FOUND → 清构建戳自动重装重建，一次性守卫、手动重启/重装会重置；其余指数退避重连×5）；`runHarnessPipeline`（**仅手动触发**，无静默自动更新；工具仅 `resolveTools` 解析、不安装）；`runClientUpdate` / `silentSelfUpdate`（仅检测新版本 → 设置按钮徽标，用户手动应用）；`dsh:installTool` / `dsh:toolchainStatus`（工具页）；`dsh:resetUpdateTasks(target)` 按管线强制终止；右键菜单注册（HKCU，`--workspace "%V"`）；`appRoot` 解析（dev=项目目录，打包=exe 目录） |
 | `dsh-runtime.mjs` | **核心类 DshRuntime**：spawn runtime（优先构建产物，回退 tsx；系统缺 node 用 `ELECTRON_RUN_AS_NODE`）；JSON-RPC 收发；**会话聚合**（echo 去重保留图片预览、usage 累计、tool 配对、**userInterrupted 抑制打断 abort 红条**）；`applyStreamChunk` 实时预览；审批队列；图片落盘 + `dshimg://` 协议；`sessions.json` 持久化（stripBlocks 瘦身：文本 50000/工具结果 5000/参数 8000 字符）；resume 失败回退新 ID；`updateConfig` 时为空 workspace 的旧会话回填烙印；`focusWorkspaceSession`（切换工作区后聚焦/新建该工作区会话，复用未使用的空会话） |
 | `client-update.mjs` | payload 自更新：`remoteHead`（ls-remote + 镜像回退）对比 `.installed-commit` → 浅克隆 → 校验结构 → `resources/app-next` → **目录改名交换**（重试 3 次）；electron/ 目录 md5 对比决定 reload vs relaunch |
 | `harness-update.mjs` | 更新管线（**本地优先**）：有仓库先 ensurePatched + installAndBuild（build stamp 没变秒过）确保本地可用，再 `probeNetwork`（curl 探 npm 镜像与 GitHub，走代理 env）+ fetch（直连 → ghfast.top 镜像），**网络不通优雅降级保留本地构建**；无仓库 → clone --depth 1（需网络，失败给指引）。install 显式 `--registry=npmmirror` + `runStreaming`（流式进度限频 1.5s/行 + 超时 `taskkill /T` 树杀，15 分钟） |
-| `toolchain.mjs` | `ensureTools`：系统缺 git → MinGit（GitHub+ghfast）、缺 pnpm → 独立 pnpm.exe（npmmirror）、缺 node → Electron 二进制硬链接；下载带 **30s 停滞 / 5min 总量熔断**（代理黑洞快速失败）；调用方传管线标签（client/harness）供强制终止隔离。`installTool(name)`（工具页单装，单飞锁，与 ensureTools 互斥）；`toolchainStatus` 返回每工具 `{source, version, path}`（system/bundled/missing） |
+| `toolchain.mjs` | **工具仅由设置→工具页安装**：`installTool(name)`（单飞锁，进度打 'tools' 标）；`resolveTools(appRoot)` 供更新管线调用——只解析不安装（系统命令优先，否则用 tools/ 下已装副本，完全缺失抛错指引到工具页），在装任务进行中会等待其完成；下载带 **30s 停滞 / 5min 总量熔断**（代理黑洞快速失败）；`toolchainStatus` 返回每工具 `{source, version, path}` |
 | `proc-registry.mjs` | 更新管线子进程与下载的注册表（按管线打标）；`killAll(tag)` 树杀该管线的子进程 + 中止其下载——强制终止互不误伤 |
 | `preload.mjs` | contextBridge 白名单桥：全部 `dsh:*` IPC + `winControl` / `onMaximized` / `saveImage` / 进度订阅等 |
 

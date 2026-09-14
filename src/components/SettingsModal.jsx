@@ -193,7 +193,7 @@ function ToolsSection({ lines }) {
   return (
     <div className="harness-section">
       <h4>构建工具</h4>
-      <div className="field-hint">harness 部署与构建所需的三个工具；系统已有则直接使用，缺失时在此预装（更新前的预检也会自动装，此处便于单独查看与预装）</div>
+      <div className="field-hint">harness 部署与构建所需的三个工具；系统已有则直接使用，缺失时在此安装后再去「更新」——更新流程本身只使用、不再自动安装</div>
       {tools
         ? (
             <>

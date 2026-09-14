@@ -131,54 +131,51 @@ function ensureNodeShim(toolsDir, electronExe) {
   }
 }
 
-let ensuring = null
 let installing = null
 
 /**
- * Resolve the toolchain, downloading portable pieces on first need.
- * Returns { git, pnpm, env } where env must be merged into every pnpm call.
+ * Resolve the toolchain WITHOUT installing anything — installation is owned
+ * by the settings 工具页. System command wins; otherwise a bundled copy
+ * under tools/ is used. Throws with guidance to 设置 → 工具 when a tool is
+ * entirely absent. Returns { git, pnpm, env } (env must be merged into
+ * every pnpm call; it carries the node shim PATH when system node is absent).
  */
-export function ensureTools(appRoot, electronExe, onStep, tag = 'shared') {
-  if (ensuring) return ensuring
-  ensuring = (async () => {
-    // a tools-page install in flight: let it settle first so the two never
-    // race on the same download destinations
-    if (installing) await installing.catch(() => {})
-    const toolsDir = join(appRoot, 'tools')
-    mkdirSync(toolsDir, { recursive: true })
+export async function resolveTools(appRoot) {
+  // a tools-page install in flight: let it settle so we never resolve a
+  // half-written bundled copy
+  if (installing) await installing.catch(() => {})
+  const toolsDir = join(appRoot, 'tools')
 
-    let git = 'git'
-    if (!(await hasCmd(git))) {
-      const bundled = join(toolsDir, 'git', 'cmd', 'git.exe')
-      git = existsSync(bundled) ? bundled : await installGit(toolsDir, onStep, tag)
-    }
+  let git = 'git'
+  if (!(await hasCmd(git))) {
+    const bundled = join(toolsDir, 'git', 'cmd', 'git.exe')
+    if (!existsSync(bundled)) throw new Error('git 不可用（系统与内置均缺失）：请到 设置 → 工具 安装')
+    git = bundled
+  }
 
-    let pnpm = 'pnpm'
-    if (!(await hasCmd(pnpm))) {
-      const bundled = join(toolsDir, 'pnpm.exe')
-      pnpm = existsSync(bundled) ? bundled : await installPnpm(toolsDir, onStep, tag)
-    }
+  let pnpm = 'pnpm'
+  if (!(await hasCmd(pnpm))) {
+    const bundled = join(toolsDir, 'pnpm.exe')
+    if (!existsSync(bundled)) throw new Error('pnpm 不可用（系统与内置均缺失）：请到 设置 → 工具 安装')
+    pnpm = bundled
+  }
 
-    const env = {}
-    // pnpm run scripts (tsc/tsdown/…) need a node on PATH; the shim provides it
-    if (!(await hasCmd('node'))) {
-      ensureNodeShim(toolsDir, electronExe)
-      if (existsSync(join(toolsDir, 'node.exe'))) {
-        env.PATH = `${toolsDir};${process.env.PATH ?? ''}`
-        env.ELECTRON_RUN_AS_NODE = '1'
-      }
-    }
-    return { git, pnpm, env }
-  })().finally(() => { ensuring = null })
-  return ensuring
+  const env = {}
+  // pnpm run scripts (tsc/tsdown/…) need a node on PATH; the shim provides it
+  if (!(await hasCmd('node'))) {
+    const nodeExe = join(toolsDir, 'node.exe')
+    if (!existsSync(nodeExe)) throw new Error('node 不可用（系统与内置均缺失）：请到 设置 → 工具 重建 shim')
+    env.PATH = `${toolsDir};${process.env.PATH ?? ''}`
+    env.ELECTRON_RUN_AS_NODE = '1'
+  }
+  return { git, pnpm, env }
 }
 
-/** Install one tool into tools/ on demand (设置 → 工具页). Uses the same
- *  install paths as ensureTools; single-flight against itself and refused
- *  while a pipeline is resolving the toolchain. */
+/** Install one tool into tools/ on demand (设置 → 工具页). Single-flight:
+ *  refused while another install runs; pipelines' resolveTools waits for
+ *  an in-flight install so the two never race on download destinations. */
 export async function installTool(name, appRoot, electronExe, onStep) {
   if (!['git', 'pnpm', 'node'].includes(name)) throw new Error(`未知工具：${name}`)
-  if (ensuring) throw new Error('更新任务正在解析工具链，请稍后再试')
   if (installing) throw new Error('已有工具安装任务在进行中')
   installing = (async () => {
     const toolsDir = join(appRoot, 'tools')
