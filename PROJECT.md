@@ -52,7 +52,7 @@
 | `dsh-runtime.mjs` | **核心类 DshRuntime**：spawn runtime（优先构建产物，回退 tsx；系统缺 node 用 `ELECTRON_RUN_AS_NODE`）；JSON-RPC 收发；**会话聚合**（echo 去重保留图片预览、usage 累计、tool 配对、**userInterrupted 抑制打断 abort 红条**）；`applyStreamChunk` 实时预览；审批队列；图片落盘 + `dshimg://` 协议；`sessions.json` 持久化（stripBlocks 瘦身：文本 50000/工具结果 5000/参数 8000 字符）；resume 失败回退新 ID；`updateConfig` 时为空 workspace 的旧会话回填烙印；`focusWorkspaceSession`（切换工作区后聚焦/新建该工作区会话，复用未使用的空会话） |
 | `client-update.mjs` | payload 自更新：`remoteHead`（ls-remote + 镜像回退）对比 `.installed-commit` → 浅克隆 → 校验结构 → `resources/app-next` → **目录改名交换**（重试 3 次）；electron/ 目录 md5 对比决定 reload vs relaunch |
 | `harness-update.mjs` | 更新管线（**本地优先**）：有仓库先 ensurePatched + installAndBuild（build stamp 没变秒过）确保本地可用，再 `probeNetwork`（curl 探 npm 镜像与 GitHub，走代理 env）+ fetch（直连 → ghfast.top 镜像），**网络不通优雅降级保留本地构建**；无仓库 → clone --depth 1（需网络，失败给指引）。install 显式 `--registry=npmmirror` + `runStreaming`（流式进度限频 1.5s/行 + 超时 `taskkill /T` 树杀，15 分钟） |
-| `toolchain.mjs` | `ensureTools`：系统缺 git → MinGit（GitHub+ghfast）、缺 pnpm → 独立 pnpm.exe（npmmirror）、缺 node → Electron 二进制硬链接；下载带 **30s 停滞 / 5min 总量熔断**（代理黑洞快速失败）；调用方传管线标签（client/harness）供强制终止隔离 |
+| `toolchain.mjs` | `ensureTools`：系统缺 git → MinGit（GitHub+ghfast）、缺 pnpm → 独立 pnpm.exe（npmmirror）、缺 node → Electron 二进制硬链接；下载带 **30s 停滞 / 5min 总量熔断**（代理黑洞快速失败）；调用方传管线标签（client/harness）供强制终止隔离。`installTool(name)`（工具页单装，单飞锁，与 ensureTools 互斥）；`toolchainStatus` 返回每工具 `{source, version, path}`（system/bundled/missing） |
 | `proc-registry.mjs` | 更新管线子进程与下载的注册表（按管线打标）；`killAll(tag)` 树杀该管线的子进程 + 中止其下载——强制终止互不误伤 |
 | `preload.mjs` | contextBridge 白名单桥：全部 `dsh:*` IPC + `winControl` / `onMaximized` / `saveImage` / 进度订阅等 |
 
@@ -65,7 +65,7 @@
 | `Sidebar.jsx` | 会话列表（**按工作区分组**、折叠记忆 localStorage、置顶/重命名/删除右键菜单）；搜索；相对时间；ChangePlanCard（`.dsh-changes/` 查看器）；底部设置按钮（红点徽标） |
 | `StatsPanel.jsx` | Token 卡 / 缓存命中率环形图 / TodoList / 待审操作卡（无对话返回 null） |
 | `ModelDropdown.jsx` | 模型下拉：官方组 + 自定义端点（label/baseURL/apiKey/model/maxTokens 增删） |
-| `SettingsModal.jsx` | 分页（通用/模型密钥/更新/系统）；更新页双管线 + 进度日志 + **按管线强制终止**；harness 源码仓库**只读展示**（自定义需手改 settings.json）；harness 无自动更新 |
+| `SettingsModal.jsx` | 分页（通用/模型密钥/**工具**/更新/系统）；工具页三卡片（git/pnpm/node 来源/版本/路径 + 缺失时单装/重建 shim，进度日志+强停）；更新页双管线 + 进度日志 + **按管线强制终止**；harness 源码仓库**只读展示**（自定义需手改 settings.json）；harness 无自动更新 |
 | 其余 | `EffortControl`（思考强度弹层）/ `WhaleMark`（蓝鲸 logo，图标单一数据源）/ `markdown.js`（轻量渲染） |
 
 ### patches/ 与 scripts/
@@ -100,9 +100,9 @@
 
 ## 5. IPC 通道总表
 
-`dsh:` getState / newSession / selectSession / deleteSession / renameSession / togglePinSession / sendPrompt(text, images, mode) / interrupt / decideApproval / restart / updateConfig / addCustomModel / removeCustomModel / pickWorkspace / saveImage / listChangePlans / checkHarnessPatches / harnessStatus / harnessUpdate / applyHarnessPatches / clientStatus / clientUpdate / resetUpdateTasks(target) / configLocations / openConfigFolder / contextMenuStatus / registerContextMenu / unregisterContextMenu / winControl / winIsMaximized
+`dsh:` getState / newSession / selectSession / deleteSession / renameSession / togglePinSession / sendPrompt(text, images, mode) / interrupt / decideApproval / restart / updateConfig / addCustomModel / removeCustomModel / pickWorkspace / saveImage / listChangePlans / checkHarnessPatches / harnessStatus / harnessUpdate / applyHarnessPatches / toolchainStatus / installTool / clientStatus / clientUpdate / resetUpdateTasks(target: client/harness/tools) / configLocations / openConfigFolder / contextMenuStatus / registerContextMenu / unregisterContextMenu / winControl / winIsMaximized
 
-推送：`dsh:snapshot` / `dsh:runtime` / `dsh:harnessProgress` / `dsh:clientProgress` / `dsh:win-maximized`
+推送：`dsh:snapshot` / `dsh:runtime` / `dsh:harnessProgress` / `dsh:clientProgress` / `dsh:toolsProgress` / `dsh:win-maximized`
 
 ## 6. 配置与数据文件
 

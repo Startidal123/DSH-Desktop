@@ -1896,6 +1896,44 @@ button {
   gap: 10px;
   margin: 10px 0 6px;
 }
+
+/* ---------- settings · tool cards ---------- */
+.tool-card {
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 10px 13px;
+  margin: 8px 0;
+}
+.tool-card.missing { border-color: rgba(224, 96, 96, 0.45); }
+.tool-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.tool-card-name { font-size: 0.84rem; font-weight: 600; }
+.tool-card-desc { font-size: 0.7rem; color: var(--text-faint); margin-top: 3px; }
+.tool-fact {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  font-family: Consolas, monospace;
+  margin-top: 5px;
+}
+.tool-path {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tool-source {
+  font-size: 0.66rem;
+  padding: 2px 9px;
+  border-radius: 99px;
+  flex: none;
+  border: 1px solid var(--border-soft);
+}
+.tool-source.system { color: #3aa675; border-color: rgba(58, 166, 117, 0.4); }
+.tool-source.bundled { color: var(--accent); border-color: rgba(77, 107, 254, 0.4); }
+.tool-source.missing { color: #d95f5f; border-color: rgba(217, 95, 95, 0.45); }
 .harness-log {
   font-size: 0.71875rem;
   line-height: 1.5;

@@ -4,6 +4,7 @@ import { IconFolder } from './Icons.jsx'
 const TABS = [
   { id: 'general', label: '通用' },
   { id: 'keys', label: '模型密钥' },
+  { id: 'tools', label: '工具' },
   { id: 'update', label: '更新' },
   { id: 'system', label: '系统' },
 ]
@@ -113,8 +114,9 @@ function HarnessUpdateSection({ lines }) {
       <div className="harness-status-line">
         {status === null ? '读取状态中…' : !status.ok
           ? `状态异常：${status.error ?? ''}`
-          : `v${status.version} · ${status.head} · ${status.built ? (status.patched ? '补丁已应用' : '补丁缺失') : '未构建'} · 工具 ${['git', 'node', 'pnpm'].map(t => `${t}:${status.tools?.[t] === 'system' ? '系统' : status.tools?.[t] === 'bundled' ? '内置' : '待装'}`).join(' ')}`}
+          : `v${status.version} · ${status.head} · ${status.built ? (status.patched ? '补丁已应用' : '补丁缺失') : '未构建'}`}
       </div>
+      <div className="field-hint">所需构建工具的状态与预装见「工具」页</div>
       <div className="harness-actions">
         <button className="btn primary" disabled={running} onClick={() => act(() => window.dsh.harnessUpdate())}>
           {running ? '执行中…' : '检查并更新'}
@@ -126,6 +128,81 @@ function HarnessUpdateSection({ lines }) {
           强制终止
         </button>
       </div>
+      <ProgressLog lines={lines} />
+    </div>
+  )
+}
+
+const TOOL_META = {
+  git: { label: 'Git', desc: '克隆与更新 harness 仓库' },
+  pnpm: { label: 'pnpm', desc: '安装依赖与构建 harness' },
+  node: { label: 'Node.js', desc: '运行 harness；内置版为 Electron 硬链接（ELECTRON_RUN_AS_NODE 模式，无下载）' },
+}
+
+function ToolCard({ name, info, busy, onInstall, onStop }) {
+  const meta = TOOL_META[name]
+  const source = info?.source ?? 'missing'
+  const sourceLabel = { system: '系统', bundled: '内置', missing: '缺失' }[source]
+  return (
+    <div className={`tool-card ${source}`}>
+      <div className="tool-card-head">
+        <span className="tool-card-name">{meta.label}</span>
+        <span className={`tool-source ${source}`}>{sourceLabel}</span>
+      </div>
+      <div className="tool-card-desc">{meta.desc}</div>
+      {info?.version && <div className="tool-fact">版本 {info.version}</div>}
+      {info?.path && <div className="tool-fact tool-path" title={info.path}>{info.path}</div>}
+      {source !== 'system' && (
+        <div className="harness-actions">
+          {busy
+            ? <button className="btn ghost" onClick={onStop} title="安装卡死时强制终止并复位状态">强制终止</button>
+            : name === 'node'
+              ? <button className="btn primary" onClick={() => onInstall(name)}>{source === 'missing' ? '重建 shim' : '重新重建'}</button>
+              : <button className="btn primary" onClick={() => onInstall(name)}>{source === 'missing' ? '下载便携版' : '重新下载'}</button>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ToolsSection({ lines }) {
+  const [status, setStatus] = useState(null)
+  const [running, setRunning] = useState(false)
+  const refresh = () => window.dsh.toolchainStatus().then(setStatus).catch(() => setStatus(null))
+  useEffect(() => { refresh() }, [])
+  useEffect(() => { setRunning(status?.busy === true) }, [status?.busy])
+  useEffect(() => {
+    const last = lines[lines.length - 1]
+    if (!last) return
+    if (/已就绪|失败|终止/.test(last)) { setRunning(false); refresh() }
+    else setRunning(true)
+  }, [lines.length])
+
+  const install = async (name) => {
+    if (running) return
+    setRunning(true)
+    const res = await window.dsh.installTool(name)
+    if (!res.ok) setRunning(false)
+  }
+  const forceStop = async () => {
+    await window.dsh.resetUpdateTasks('tools').catch(() => {})
+    setRunning(false)
+  }
+
+  const tools = status?.tools
+  return (
+    <div className="harness-section">
+      <h4>构建工具</h4>
+      <div className="field-hint">harness 部署与构建所需的三个工具；系统已有则直接使用，缺失时在此预装（更新前的预检也会自动装，此处便于单独查看与预装）</div>
+      {tools
+        ? (
+            <>
+              <ToolCard name="git" info={tools.git} busy={running} onInstall={install} onStop={forceStop} />
+              <ToolCard name="pnpm" info={tools.pnpm} busy={running} onInstall={install} onStop={forceStop} />
+              <ToolCard name="node" info={tools.node} busy={running} onInstall={install} onStop={forceStop} />
+            </>
+          )
+        : '读取状态中…'}
       <ProgressLog lines={lines} />
     </div>
   )
@@ -165,7 +242,7 @@ function ContextMenuToggle() {
   )
 }
 
-export default function SettingsModal({ config, hasApiKey, harnessLines, clientLines, onClose, onSave, onPickWorkspace }) {
+export default function SettingsModal({ config, hasApiKey, harnessLines, clientLines, toolLines, onClose, onSave, onPickWorkspace }) {
   const [tab, setTab] = useState('general')
   const [saving, setSaving] = useState(false)
   const [workspace, setWorkspace] = useState(config.workspace ?? '')
@@ -278,6 +355,8 @@ export default function SettingsModal({ config, hasApiKey, harnessLines, clientL
                 </div>
               </>
             )}
+
+            {tab === 'tools' && <ToolsSection lines={toolLines} />}
 
             {tab === 'update' && (
               <>

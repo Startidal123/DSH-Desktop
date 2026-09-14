@@ -25,6 +25,7 @@ export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('dsh-theme') ?? 'light')
   const [harnessLines, setHarnessLines] = useState([])
   const [clientLines, setClientLines] = useState([])
+  const [toolLines, setToolLines] = useState([])
   const [updateBadge, setUpdateBadge] = useState(false)
   const [maximized, setMaximized] = useState(false)
   const [statsOpen, setStatsOpen] = useState(() => localStorage.getItem('dsh-stats-open') !== 'false')
@@ -92,13 +93,17 @@ export default function App() {
       if (step === 'available') setUpdateBadge(true)
     })
 
+    const offTools = window.dsh.onToolsProgress(({ text }) => {
+      setToolLines(prev => [...prev.slice(-(MAX_PROGRESS_LINES - 1)), text])
+    })
+
     const statusTimer = setInterval(async () => {
       try {
         const s = await window.dsh.getState()
         setRuntimeStatus(prev => (prev === s.runtime ? prev : s.runtime))
       } catch { /* renderer tearing down */ }
     }, 5000)
-    return () => { offSnapshot(); offRuntime(); offHarness(); offClient(); clearInterval(statusTimer) }
+    return () => { offSnapshot(); offRuntime(); offHarness(); offClient(); offTools(); clearInterval(statusTimer) }
   }, [])
 
   const toggleStats = useCallback(() => {
@@ -254,6 +259,7 @@ export default function App() {
           hasApiKey={hasApiKey}
           harnessLines={harnessLines}
           clientLines={clientLines}
+          toolLines={toolLines}
           onClose={() => setShowSettings(false)}
           onSave={saveConfig}
           onPickWorkspace={() => window.dsh.pickWorkspace()}

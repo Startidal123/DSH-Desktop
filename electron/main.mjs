@@ -5,7 +5,7 @@ import { resolve, join, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DshRuntime } from './dsh-runtime.mjs'
 import { DEFAULT_REPO, harnessStatus, updateHarness, applyPatchOnly, setToolchain, probeNetwork } from './harness-update.mjs'
-import { ensureTools, toolchainStatus } from './toolchain.mjs'
+import { ensureTools, toolchainStatus, installTool } from './toolchain.mjs'
 import { clientStatus, clientUpdate } from './client-update.mjs'
 import { killAll } from './proc-registry.mjs'
 
@@ -319,6 +319,7 @@ async function silentSelfUpdate() {
  *  the client, and stopping one pipeline leaves the other untouched. */
 let clientGen = 0
 let harnessGen = 0
+let toolsGen = 0
 
 let updatingClient = false
 
@@ -491,11 +492,35 @@ async function runHarnessPipeline({ patchesOnly = false } = {}) {
 
 ipcMain.handle('dsh:harnessStatus', async () => {
   const rt = ensureRuntime()
-  const [status, tools] = await Promise.all([
-    harnessStatus(rt.config.harnessDir),
-    toolchainStatus(appRoot),
-  ])
-  return { ...status, tools, busy: updatingHarness }
+  const status = await harnessStatus(rt.config.harnessDir)
+  return { ...status, busy: updatingHarness }
+})
+
+let installingTool = false
+
+ipcMain.handle('dsh:toolchainStatus', async () => {
+  return { tools: await toolchainStatus(appRoot), busy: installingTool }
+})
+
+ipcMain.handle('dsh:installTool', async (_e, name) => {
+  if (installingTool) return { ok: false, error: '已有工具安装任务在进行中' }
+  if (!['git', 'pnpm', 'node'].includes(name)) return { ok: false, error: `未知工具：${name}` }
+  installingTool = true
+  const myGen = toolsGen
+  try {
+    const { path } = await installTool(name, appRoot, process.execPath, (text) => {
+      if (myGen !== toolsGen) throw new Error('更新任务已被强制终止')
+      send('dsh:toolsProgress', { step: name, text })
+    })
+    send('dsh:toolsProgress', { step: 'done', text: `${name} 已就绪（${path}）` })
+    return { ok: true, path }
+  } catch (err) {
+    const msg = String(err.message ?? err)
+    if (msg !== '更新任务已被强制终止') send('dsh:toolsProgress', { step: 'error', text: `安装失败：${msg}` })
+    return { ok: false, error: msg }
+  } finally {
+    installingTool = false
+  }
 })
 
 /** Force-clear a stuck update task, scoped to one pipeline ('client' |
@@ -504,7 +529,7 @@ ipcMain.handle('dsh:harnessStatus', async () => {
  *  without disturbing the other pipeline. Lets the user re-launch the
  *  update without restarting the client. */
 ipcMain.handle('dsh:resetUpdateTasks', (_e, target) => {
-  const scope = target === 'client' || target === 'harness' ? target : 'all'
+  const scope = target === 'client' || target === 'harness' || target === 'tools' ? target : 'all'
   let killed = 0
   if (scope === 'client' || scope === 'all') {
     killed += killAll('client')
@@ -516,10 +541,16 @@ ipcMain.handle('dsh:resetUpdateTasks', (_e, target) => {
     harnessGen += 1
     updatingHarness = false
   }
-  const label = scope === 'client' ? '客户端更新任务' : scope === 'harness' ? 'harness 更新任务' : '更新任务'
+  if (scope === 'tools' || scope === 'all') {
+    killed += killAll('tools')
+    toolsGen += 1
+    installingTool = false
+  }
+  const label = scope === 'client' ? '客户端更新任务' : scope === 'harness' ? 'harness 更新任务' : scope === 'tools' ? '工具安装任务' : '更新任务'
   const text = `已强制终止${label}${killed ? `（结束 ${killed} 个子进程/下载）` : ''}，可重新点击更新按钮`
   if (scope === 'client' || scope === 'all') send('dsh:clientProgress', { step: 'error', text })
   if (scope === 'harness' || scope === 'all') send('dsh:harnessProgress', { step: 'error', text })
+  if (scope === 'tools' || scope === 'all') send('dsh:toolsProgress', { step: 'error', text })
   return { ok: true, killed }
 })
 

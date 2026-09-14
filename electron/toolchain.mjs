@@ -85,7 +85,10 @@ async function installGit(toolsDir, onStep, tag) {
       await unzip(tmp, gitRoot, tag)
       unlinkSync(tmp)
       if (existsSync(join(gitRoot, 'cmd', 'git.exe'))) return join(gitRoot, 'cmd', 'git.exe')
-    } catch { /* try the mirror */ }
+    } catch (err) {
+      if (String(err?.message ?? '').includes('强制终止')) throw err
+      /* try the mirror */
+    }
   }
   throw new Error('便携版 git 下载失败（直连与镜像均不可达），请检查网络')
 }
@@ -129,6 +132,7 @@ function ensureNodeShim(toolsDir, electronExe) {
 }
 
 let ensuring = null
+let installing = null
 
 /**
  * Resolve the toolchain, downloading portable pieces on first need.
@@ -137,6 +141,9 @@ let ensuring = null
 export function ensureTools(appRoot, electronExe, onStep, tag = 'shared') {
   if (ensuring) return ensuring
   ensuring = (async () => {
+    // a tools-page install in flight: let it settle first so the two never
+    // race on the same download destinations
+    if (installing) await installing.catch(() => {})
     const toolsDir = join(appRoot, 'tools')
     mkdirSync(toolsDir, { recursive: true })
 
@@ -166,12 +173,49 @@ export function ensureTools(appRoot, electronExe, onStep, tag = 'shared') {
   return ensuring
 }
 
-/** Read-only toolchain facts for the settings page. */
+/** Install one tool into tools/ on demand (设置 → 工具页). Uses the same
+ *  install paths as ensureTools; single-flight against itself and refused
+ *  while a pipeline is resolving the toolchain. */
+export async function installTool(name, appRoot, electronExe, onStep) {
+  if (!['git', 'pnpm', 'node'].includes(name)) throw new Error(`未知工具：${name}`)
+  if (ensuring) throw new Error('更新任务正在解析工具链，请稍后再试')
+  if (installing) throw new Error('已有工具安装任务在进行中')
+  installing = (async () => {
+    const toolsDir = join(appRoot, 'tools')
+    mkdirSync(toolsDir, { recursive: true })
+    if (name === 'git') return { path: await installGit(toolsDir, onStep, 'tools') }
+    if (name === 'pnpm') return { path: await installPnpm(toolsDir, onStep, 'tools') }
+    const nodeExe = join(toolsDir, 'node.exe')
+    ensureNodeShim(toolsDir, electronExe)
+    if (!existsSync(nodeExe)) throw new Error('重建 node shim 失败（Electron 二进制不可用）')
+    onStep?.('node shim 已就绪（Electron 硬链接，ELECTRON_RUN_AS_NODE 模式）')
+    return { path: nodeExe }
+  })().finally(() => { installing = null })
+  return installing
+}
+
+/** Read-only toolchain facts for the settings 工具页: per-tool
+ *  { source: 'system' | 'bundled' | 'missing', version, path }. */
 export async function toolchainStatus(appRoot) {
   const toolsDir = join(appRoot, 'tools')
-  return {
-    git: (await hasCmd('git')) ? 'system' : existsSync(join(toolsDir, 'git', 'cmd', 'git.exe')) ? 'bundled' : 'missing',
-    pnpm: (await hasCmd('pnpm')) ? 'system' : existsSync(join(toolsDir, 'pnpm.exe')) ? 'bundled' : 'missing',
-    node: (await hasCmd('node')) ? 'system' : existsSync(join(toolsDir, 'node.exe')) ? 'bundled' : 'missing',
+  const probe = async (name, bundledPath, runAsNode = false) => {
+    const sys = await run(`where ${name}`, process.cwd(), 15000)
+    if (sys.ok && sys.out) {
+      const path = sys.out.split(/\r?\n/)[0].trim()
+      const version = (await run(`"${path}" --version`, process.cwd(), 15000)).out
+      return { source: 'system', path, version }
+    }
+    if (existsSync(bundledPath)) {
+      const prefix = runAsNode ? 'set ELECTRON_RUN_AS_NODE=1&& ' : ''
+      const version = (await run(`${prefix}"${bundledPath}" --version`, process.cwd(), 15000)).out
+      return { source: 'bundled', path: bundledPath, version }
+    }
+    return { source: 'missing', path: '', version: '' }
   }
+  const [git, pnpm, node] = await Promise.all([
+    probe('git', join(toolsDir, 'git', 'cmd', 'git.exe')),
+    probe('pnpm', join(toolsDir, 'pnpm.exe')),
+    probe('node', join(toolsDir, 'node.exe'), true),
+  ])
+  return { git, pnpm, node }
 }
