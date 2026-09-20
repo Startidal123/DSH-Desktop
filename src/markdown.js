@@ -43,7 +43,9 @@ export function renderMarkdown(src) {
   for (const line of lines) {
     if (line.startsWith('```')) {
       if (inCode) {
-        out.push(`<pre data-lang="${escapeHtml(codeLang)}"><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`)
+        const code = codeLines.join('\n')
+        // an empty code block renders as a visible blank box — skip it
+        if (code.trim()) out.push(`<pre data-lang="${escapeHtml(codeLang)}"><code>${escapeHtml(code)}</code></pre>`)
         inCode = false
         codeLines = []
       } else {
@@ -71,17 +73,22 @@ export function renderMarkdown(src) {
     closeList()
     out.push(`<p>${inline(line)}</p>`)
   }
-  if (inCode) out.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`)
+  if (inCode) {
+    // unclosed fence at the end (streaming, or a fragment split at a tool
+    // call): emit only when code actually accumulated — otherwise it is a
+    // blank box
+    const code = codeLines.join('\n')
+    if (code.trim()) out.push(`<pre><code>${escapeHtml(code)}</code></pre>`)
+  }
   closeList()
   return out.join('')
 }
 
 export function firstText(content) {
   if (!Array.isArray(content)) return ''
-  for (const block of content) {
-    if (block?.type === 'text' && block.text) return block.text
-  }
-  return ''
+  // join ALL text blocks — messages split around tool calls carry text on
+  // both sides and the tail would be lost otherwise
+  return content.filter(b => b?.type === 'text' && b.text).map(b => b.text).join('\n\n')
 }
 
 export function reasoningText(content) {

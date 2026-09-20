@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar.jsx'
 import ChatPanel from './components/ChatPanel.jsx'
 import StatsPanel from './components/StatsPanel.jsx'
 import SettingsModal from './components/SettingsModal.jsx'
+import SubagentModal from './components/SubagentModal.jsx'
 
 const initial = {
   sessions: [],
@@ -37,6 +38,20 @@ export default function App() {
   const [updateBadge, setUpdateBadge] = useState(false)
   const [maximized, setMaximized] = useState(false)
   const [statsOpen, setStatsOpen] = useState(() => localStorage.getItem('dsh-stats-open') !== 'false')
+  const [subagentView, setSubagentView] = useState(null)
+  const [subagentData, setSubagentData] = useState(null)
+
+  // keep the subagent viewer live while it is open: refetch on every
+  // snapshot (the active session's subagent list refreshes updatedAt)
+  useEffect(() => {
+    if (!subagentView) return
+    window.dsh.markSubagentViewed(subagentView).catch(() => {})
+    let cancelled = false
+    window.dsh.subagentSession(subagentView)
+      .then(d => { if (!cancelled) setSubagentData(d) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [subagentView, state.active?.subagents])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -240,7 +255,9 @@ export default function App() {
         onSwitchWorkspace={switchWorkspace}
         onSend={send}
       />
-      {state.active?.messages?.length > 0 && statsOpen && <StatsPanel session={state.active} />}
+      {state.active?.messages?.length > 0 && statsOpen && (
+        <StatsPanel session={state.active} onOpenSubagent={setSubagentView} />
+      )}
       {state.active?.messages?.length > 0 && (
         <div
           className="stats-edge"
@@ -260,6 +277,13 @@ export default function App() {
             )}
           </button>
         </div>
+      )}
+      {subagentView && (
+        <SubagentModal
+          data={subagentData}
+          showToolActivity={config.showToolActivity === true}
+          onClose={() => { setSubagentView(null); setSubagentData(null) }}
+        />
       )}
       {showSettings && (
         <SettingsModal

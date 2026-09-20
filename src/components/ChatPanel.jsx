@@ -158,6 +158,59 @@ function ToolCard({ msg, hit, current, idx }) {
   )
 }
 
+/** Compact activity chips (debug display): tool calls and subagent
+ *  lifecycle notes rendered as tiny pills at the top-left of the assistant
+ *  bubble that triggered them. Clicking a tool chip expands the full card. */
+export function ActivityChips({ items }) {
+  const [openIdx, setOpenIdx] = useState(-1)
+  if (!items?.length) return null
+  return (
+    <div className="activity-chips">
+      {items.map((m, i) => (
+        m.kind === 'tool' ? (
+          <button
+            key={i}
+            className={`activity-chip tool ${m.status === 'running' ? 'running' : m.isError ? 'error' : 'ok'}`}
+            title="点击展开工具详情"
+            onClick={() => setOpenIdx(openIdx === i ? -1 : i)}
+          >
+            {m.name}{m.status === 'running' ? '…' : m.isError ? ' ✕' : ' ✓'}
+          </button>
+        ) : (
+          <span key={i} className="activity-chip note" title={m.note}>{m.note}</span>
+        )
+      ))}
+      {openIdx >= 0 && items[openIdx]?.kind === 'tool' && (
+        <ToolCard msg={items[openIdx]} idx={-1} />
+      )}
+    </div>
+  )
+}
+
+/** Group tool/note activity under the assistant message that triggered it.
+ *  With showActivity off, tool messages and subagent lifecycle notes are
+ *  dropped from the visible list entirely (note-error always stays). */
+export function groupForDisplay(messages, showActivity) {
+  const entries = []
+  const chipsByAnchor = new Map()
+  let anchor = null
+  ;(messages ?? []).forEach((m, i) => {
+    if (m.kind === 'tool' || m.kind === 'note') {
+      if (!showActivity) return
+      const key = anchor ?? Math.max(0, entries.length - 1)
+      if (!chipsByAnchor.has(key)) chipsByAnchor.set(key, [])
+      chipsByAnchor.get(key).push(m)
+      return
+    }
+    if (m.kind === 'assistant') anchor = entries.length
+    entries.push({ msg: m, idx: i, activity: null })
+  })
+  for (const [k, chips] of chipsByAnchor) {
+    if (entries[k]) entries[k].activity = chips
+  }
+  return entries
+}
+
 function LiveThinking({ live }) {
   const bodyRef = useRef(null)
   useEffect(() => {
@@ -246,50 +299,74 @@ function CollapsibleText({ html, msgKey }) {
   )
 }
 
-function AssistantMessage({ msg, onImageClick, idx, hit, current, msgKey }) {
+function AssistantMessage({ msg, onImageClick, idx, hit, current, msgKey, metaShown, onMetaHover, activity }) {
   const reasoning = reasoningText(msg.content)
   const html = useMemo(() => renderMarkdown(firstText(msg.content)), [msg.content])
-  const cls = `msg-row assistant ${hit ? 'search-hit' : ''} ${current ? 'search-current' : ''}`
+  // nothing visible (no reasoning, no text, no placeholder — e.g. a
+  // tool-call-only message from a model that emits no reasoning): skip the
+  // row entirely, otherwise it renders as a blank strip (invisible meta
+  // only) after every thinking+operation step
+  if (!html && !reasoning && !msg.interrupted) return null
+  const cls = `msg-row assistant ${hit ? 'search-hit' : ''} ${current ? 'search-current' : ''} ${metaShown ? 'meta-showing' : ''}`
   return (
-    <div className={cls} id={`msg-${idx}`}>
+    <div className={cls} id={`msg-${idx}`} onMouseEnter={onMetaHover}>
+      {activity && <ActivityChips items={activity} />}
       <ReasoningBlock text={reasoning} />
       {html
         ? <CollapsibleText html={html} msgKey={msgKey} />
-        : <div className="bubble placeholder">{msg.interrupted ? '（回复被中断）' : '（无文本输出）'}</div>}
-      <div className="msg-meta">
-        <span className="msg-time">{fmtMsgTime(msg.time)}</span>
-        <UsageTag usage={msg.usage} />
-        <CopyButton getText={() => firstText(msg.content)} title="复制回复原文" />
-      </div>
+        : msg.interrupted
+          ? <div className="bubble placeholder">（回复被中断）</div>
+          : null}
+      {(html || msg.interrupted) && (
+        <div className="msg-meta">
+          <span className="msg-time">{fmtMsgTime(msg.time)}</span>
+          <UsageTag usage={msg.usage} />
+          <CopyButton getText={() => firstText(msg.content)} title="复制回复原文" />
+        </div>
+      )}
     </div>
   )
 }
 
-function Message({ msg, onImageClick, idx, hit, current, msgKey }) {
+export function Message({ msg, onImageClick, idx, hit, current, msgKey, metaShown, onMetaHover, showInjected, activity }) {
   const searchCls = `${hit ? 'search-hit' : ''} ${current ? 'search-current' : ''}`.trim()
   if (msg.kind === 'note') {
+    if (!msg.note) return null
     return <div className={`note-row ${searchCls}`} id={`msg-${idx}`}>{msg.note}</div>
   }
   if (msg.kind === 'note-error') {
+    if (!msg.note) return null
     return <div className={`note-row error ${searchCls}`} id={`msg-${idx}`}>{msg.note}</div>
   }
   if (msg.kind === 'tool') {
     return <ToolCard msg={msg} hit={hit} current={current} idx={idx} />
   }
   if (msg.kind === 'user' || msg.kind === 'user-local') {
-    const injected = msg.source?.kind !== undefined && msg.source.kind !== 'user'
-    if (injected) return null
+    const srcKind = msg.source?.kind
+    const injected = srcKind !== undefined && srcKind !== 'user'
+    // the subagent viewer shows the parent↔child interaction, so relayed
+    // agent messages render there (badged); the main chat keeps them hidden
+    if (injected && (!showInjected || srcKind === 'plugin')) return null
+    const isRelay = srcKind === 'agent-message'
     const imageBlocks = (msg.content ?? []).filter(b => b?.type === 'image')
     const inlineImages = imageBlocks.filter(b => (b.data || b.path) && b.mimeType)
     const remoteImages = imageBlocks.filter(b => !(b.data || b.path) || !b.mimeType)
     const srcOf = (img) => (img.data ? `data:${img.mimeType};base64,${img.data}` : `dshimg://${img.path}`)
-    const body = (msg.content ?? [])
-      .filter(b => b?.type === 'text' && b.text)
-      .map(b => b.text)
-      .join('\n')
+    const textBlocks = (msg.content ?? []).filter(b => b?.type === 'text' && b.text)
+    // relayed messages carry a "Agent xxx sent a message:" wrapper line —
+    // strip it and badge the bubble instead
+    const displayBlocks = isRelay && /^Agent .+ sent a message:?\s*$/i.test(textBlocks[0]?.text ?? '')
+      ? textBlocks.slice(1)
+      : textBlocks
+    const body = displayBlocks.map(b => b.text).join('\n')
     return (
-      <div className={`msg-row user ${searchCls}`} id={`msg-${idx}`}>
+      <div
+        className={`msg-row user ${searchCls} ${metaShown ? 'meta-showing' : ''}`}
+        id={`msg-${idx}`}
+        onMouseEnter={onMetaHover}
+      >
         <div className="user-bubble-group">
+          {isRelay && <div className="relay-badge">父代理</div>}
           {inlineImages.length > 0 && (
             <div className="msg-image-row">
               {inlineImages.map((img, i) => (
@@ -324,7 +401,7 @@ function Message({ msg, onImageClick, idx, hit, current, msgKey }) {
       </div>
     )
   }
-  if (msg.kind === 'assistant') {    return <AssistantMessage msg={msg} idx={idx} hit={hit} current={current} msgKey={msgKey} />
+  if (msg.kind === 'assistant') {    return <AssistantMessage msg={msg} idx={idx} hit={hit} current={current} msgKey={msgKey} metaShown={metaShown} onMetaHover={onMetaHover} activity={activity} />
   }
   return null
 }
@@ -341,9 +418,20 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [findIdx, setFindIdx] = useState(0)
+  // sticky meta: the last hovered message keeps its time/copy row visible
+  // until another message bubble is hovered (indexes reset per session)
+  const [metaIdx, setMetaIdx] = useState(null)
+  useEffect(() => { setMetaIdx(null) }, [session?.id])
   const lastAssistantRef = useRef(null)
 
   // in-conversation search: message indices whose text contains the query
+  // (only messages that actually render — tool/note rows may be grouped or
+  // hidden depending on the debug toggle)
+  const showActivity = config?.showToolActivity === true
+  const displayEntries = useMemo(
+    () => groupForDisplay(session?.messages, showActivity),
+    [session?.messages, showActivity],
+  )
   const findMatches = useMemo(() => {
     const q = findQuery.trim().toLowerCase()
     if (!q || !session?.messages) return []
@@ -553,45 +641,49 @@ export default function ChatPanel({ session, runtimeStatus, error, patchWarn, on
         </div>
       )}
 
-      <div className="message-list" ref={listRef}>
-        {!hasData ? (
-          <div className="welcome">
-            <div className="welcome-brand">
-              <WhaleMark size={64} />
-              <span className="welcome-title">探索未知之境</span>
+      <div className="message-area">
+        <div className="message-list" ref={listRef}>
+          {!hasData ? (
+            <div className="welcome">
+              <div className="welcome-brand">
+                <WhaleMark size={64} />
+                <span className="welcome-title">探索未知之境</span>
+              </div>
             </div>
-          </div>
-        ) : (
-          session.messages.map((m, i) => (
+          ) : (
+          displayEntries.map(e => (
             <Message
-              key={i}
-              msg={m}
+              key={e.idx}
+              msg={e.msg}
               onImageClick={setLightbox}
-              idx={i}
-              hit={findMatches.includes(i)}
-              current={findMatches[findIdx] === i}
-              msgKey={msgCollapseKey(session?.id, m)}
+              idx={e.idx}
+              hit={findMatches.includes(e.idx)}
+              current={findMatches[findIdx] === e.idx}
+              msgKey={msgCollapseKey(session?.id, e.msg)}
+              metaShown={metaIdx === e.idx}
+              onMetaHover={() => setMetaIdx(e.idx)}
+              activity={e.activity}
             />
           ))
-        )}
-        {running && <LiveThinking live={session?.livePreview} />}
-        {running && session?.livePreview?.text && (
-          <div className="msg-row assistant live-output">
-            <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(session.livePreview.text) }} />
-          </div>
+          )}
+          {running && <LiveThinking live={session?.livePreview} />}
+          {running && session?.livePreview?.text && (
+            <div className="msg-row assistant live-output">
+              <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(session.livePreview.text) }} />
+            </div>
+          )}
+        </div>
+        {showJump && (
+          <button className="jump-bottom" title="回到底部" onClick={jumpToBottom}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 5v14" />
+              <path d="m19 12-7 7-7-7" />
+            </svg>
+            {running && <span className="jump-live-dot" />}
+          </button>
         )}
       </div>
-
-      {showJump && (
-        <button className="jump-bottom" title="回到底部" onClick={jumpToBottom}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M12 5v14" />
-            <path d="m19 12-7 7-7-7" />
-          </svg>
-          {running && <span className="jump-live-dot" />}
-        </button>
-      )}
 
       {error && <div className="error-bar">{error}</div>}
       {patchWarn && <div className="error-bar warn-bar">{patchWarn}</div>}

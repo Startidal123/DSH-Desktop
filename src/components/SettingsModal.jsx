@@ -6,6 +6,7 @@ const TABS = [
   { id: 'keys', label: '模型密钥' },
   { id: 'tools', label: '工具' },
   { id: 'update', label: '更新' },
+  { id: 'debug', label: '调试' },
   { id: 'system', label: '系统' },
 ]
 
@@ -146,7 +147,7 @@ function ToolCard({ name, info, busy, onInstall, onStop }) {
   const source = info?.source ?? 'missing'
   const sourceLabel = { system: '系统', bundled: '内置', missing: '缺失' }[source]
   return (
-    <div className={`tool-card ${source}`}>
+    <div className={`devtool-card ${source}`}>
       <div className="tool-card-head">
         <span className="tool-card-name">{meta.label}</span>
         <span className={`tool-source ${source}`}>{sourceLabel}</span>
@@ -253,6 +254,7 @@ export default function SettingsModal({ config, hasApiKey, harnessLines, clientL
   const [locs, setLocs] = useState(null)
   const [dsApiKey, setDsApiKey] = useState(config.dsApiKey ?? '')
   const [dsBaseUrl, setDsBaseUrl] = useState(config.dsBaseUrl ?? '')
+  const [debugTools, setDebugTools] = useState(config.showToolActivity === true)
   const officialSelected = !config.activeCustom
 
   useEffect(() => {
@@ -374,6 +376,24 @@ export default function SettingsModal({ config, hasApiKey, harnessLines, clientL
                   <div className="field-hint">更新时自动走镜像加速；地址不可修改（如需自定义请编辑 settings.json 中的 harnessRepo）</div>
                 </div>
               </>
+            )}
+
+            {tab === 'debug' && (
+              <div className="harness-section">
+                <h4>调试显示</h4>
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={debugTools}
+                    onChange={e => {
+                      setDebugTools(e.target.checked)
+                      onSave({ showToolActivity: e.target.checked })
+                    }}
+                  />
+                  <span>在对话中显示工具调用与子代理启停消息（缩略标记置于模型气泡左上角，点击标记可展开详情）</span>
+                </label>
+                <div className="field-hint">默认关闭：对话只显示用户与模型的消息，保持界面纯净；需要排查执行过程或关注工具行为时再开启。错误信息不受此开关影响，始终显示。</div>
+              </div>
             )}
 
             {tab === 'system' && (

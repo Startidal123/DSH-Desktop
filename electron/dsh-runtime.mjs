@@ -89,6 +89,7 @@ export class DshRuntime {
     this.stderrTail = []
     this.stderrHead = ''
     this.sessions = new Map()
+    this.dismissedSubagents = new Map()
     this.activeId = null
     this.initializePromise = null
     this.dead = false
@@ -110,13 +111,17 @@ export class DshRuntime {
     }
   }
 
-  /** Sessions ordered pinned-first then most-recently-active. */
+  /** Sessions ordered pinned-first then most-recently-active. Subagent
+   *  sessions never appear in the sidebar — they surface via the stats
+   *  panel's subagent list and viewer instead. */
   orderedSessions() {
-    return [...this.sessions.values()].sort((a, b) => {
-      const pin = (b.pinned === true) - (a.pinned === true)
-      if (pin !== 0) return pin
-      return b.updatedAt - a.updatedAt
-    })
+    return [...this.sessions.values()]
+      .filter(s => !s.subagent)
+      .sort((a, b) => {
+        const pin = (b.pinned === true) - (a.pinned === true)
+        if (pin !== 0) return pin
+        return b.updatedAt - a.updatedAt
+      })
   }
 
   getState() {
@@ -178,6 +183,18 @@ export class DshRuntime {
       todos: s.todos,
       livePreview: s.livePreview ?? null,
       approvals: s.approvals ?? [],
+      subagents: [...this.sessions.values()]
+        .filter(x => x.subagent && x.parentId === s.id)
+        .map(x => ({
+          id: x.id,
+          title: x.title,
+          status: x.subagentStatus ?? x.status,
+          updatedAt: x.updatedAt,
+          messageCount: x.messages.length,
+          index: x.subagentIndex ?? 99,
+          viewed: x.viewed === true,
+        }))
+        .sort((a, b) => a.index - b.index),
     }
   }
 
@@ -215,11 +232,22 @@ export class DshRuntime {
       pinned: s.pinned === true,
       workspace: s.workspace ?? '',
       messages: s.messages.map(m => this.serializeMessage(m)),
+      ...(s.subagent ? {
+        subagent: true,
+        parentId: s.parentId ?? '',
+        subagentStatus: s.subagentStatus ?? '',
+        subagentIndex: s.subagentIndex ?? 99,
+        viewed: s.viewed === true,
+      } : {}),
     }
   }
 
   serializeMessage(m) {
-    if (m.kind === 'note') return { kind: 'note', note: m.note, time: m.time }
+    if (m.kind === 'note' || m.kind === 'note-error') {
+      // note-error MUST carry its note too — the generic branch below drops
+      // it, and a restart would turn the red error row into an empty box
+      return { kind: m.kind, note: m.note, time: m.time }
+    }
     if (m.kind === 'tool') {
       return {
         kind: 'tool',
@@ -237,6 +265,9 @@ export class DshRuntime {
       source: m.source,
       time: m.time,
       content: this.stripBlocks(m.content, 50000),
+      // per-message usage powers the token-breakdown view; without it the
+      // detail list would go empty after a restart
+      ...(m.usage ? { usage: m.usage } : {}),
     }
   }
 
@@ -273,11 +304,37 @@ export class DshRuntime {
           serverEpoch: 0,
           pinned: s.pinned === true,
           workspace: s.workspace ?? '',
+          ...(s.subagent ? {
+            subagent: true,
+            parentId: s.parentId ?? '',
+            subagentStatus: s.subagentStatus ?? '',
+            subagentIndex: s.subagentIndex ?? 99,
+            viewed: s.viewed === true,
+          } : {}),
         })
       }
       // start on the welcome screen: sessions stay listed in the sidebar,
       // but the chat pane opens empty until the user picks one or sends
       this.activeId = null
+      // legacy subagent sessions predate the index field (they would all
+      // show the 99 fallback) — backfill creation order per parent once
+      {
+        const byParent = new Map()
+        for (const s of this.sessions.values()) {
+          if (!s.subagent) continue
+          const key = s.parentId ?? ''
+          if (!byParent.has(key)) byParent.set(key, [])
+          byParent.get(key).push(s)
+        }
+        let changed = false
+        for (const group of byParent.values()) {
+          if (group.every(x => Number.isInteger(x.subagentIndex) && x.subagentIndex > 0 && x.subagentIndex < 99)) continue
+          group.sort((a, b) => a.updatedAt - b.updatedAt)
+          group.forEach((x, i) => { x.subagentIndex = i + 1 })
+          changed = true
+        }
+        if (changed) this.persist()
+      }
     } catch { /* corrupt file: start fresh */ }
   }
 
@@ -295,6 +352,17 @@ export class DshRuntime {
         toolByCallId: new Map(),
         serverEpoch: this.sessionEpoch,
         workspace: this.config.workspace || '',
+      }
+      // events from a dismissed (user-deleted) subagent recreate its session
+      // flagged with the original parent + index: a still-running subagent
+      // thus REAPPEARS in the subagent list (accidental-delete protection)
+      // and never leaks into the sidebar
+      if (this.dismissedSubagents.has(id)) {
+        const d = this.dismissedSubagents.get(id) ?? { parentId: '', index: 99 }
+        s.subagent = true
+        s.parentId = d.parentId
+        s.viewed = true
+        s.subagentIndex = d.index
       }
       this.sessions.set(id, s)
     }
@@ -552,19 +620,63 @@ export class DshRuntime {
       return
     }
     if (method === 'subagent.started') {
+      // the child's session.status/event notifications arrive with its own
+      // session id and lazily create a shell session — flag it so it stays
+      // out of the sidebar and links back to the parent for the viewer
+      const child = this.ensureSession(params.childSessionId)
+      child.subagent = true
+      child.parentId = params.parentSessionId
+      child.subagentStatus = 'running'
+      child.viewed = false
+      // the harness re-invokes finished subagents under the SAME child
+      // session id — the creation index must be sticky, not recomputed on
+      // every re-start (otherwise the numbers keep drifting upward)
+      if (!Number.isInteger(child.subagentIndex) || child.subagentIndex <= 0) {
+        child.subagentIndex = 1 + Math.max(0, ...[...this.sessions.values()]
+          .filter(x => x.subagent && x.parentId === params.parentSessionId)
+          .map(x => x.subagentIndex ?? 0))
+      }
       const s = this.sessions.get(params.parentSessionId)
       if (s) {
         s.messages.push({ kind: 'note', note: `子任务已启动（${params.childSessionId.slice(0, 8)}）`, time: Date.now() })
-        this.emitSnapshot()
       }
+      this.emitSnapshot()
       return
     }
     if (method === 'subagent.finished') {
+      const child = this.sessions.get(params.childSessionId)
+      if (child) {
+        child.subagent = true
+        child.parentId = params.parentSessionId
+        child.subagentStatus = params.status === 'ok' ? 'ok' : 'failed'
+      }
       const s = this.sessions.get(params.parentSessionId)
       if (s) {
         s.messages.push({ kind: 'note', note: `子任务完成（${params.status === 'ok' ? '成功' : '失败'}）`, time: Date.now() })
-        this.emitSnapshot()
       }
+      this.emitSnapshot()
+    }
+  }
+
+  /** Remove a subagent view the user no longer wants. The dismissal record
+   *  keeps parent + index so that events from a STILL-RUNNING child
+   *  recreate it with its original number (accidental-delete protection)
+   *  while it never leaks into the sidebar as a stray conversation.
+   *  Finished subagents have no further events, so their deletion sticks. */
+  deleteSubagent(id) {
+    const s = this.sessions.get(id)
+    if (!s || !s.subagent) return false
+    this.dismissedSubagents.set(id, { parentId: s.parentId ?? '', index: s.subagentIndex ?? 99 })
+    this.sessions.delete(id)
+    this.emitSnapshot()
+    return true
+  }
+
+  markSubagentViewed(id) {
+    const s = this.sessions.get(id)
+    if (s?.subagent && s.viewed !== true) {
+      s.viewed = true
+      this.emitSnapshot()
     }
   }
 

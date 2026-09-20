@@ -749,6 +749,16 @@ ipcMain.handle('dsh:getState', () => {
 ipcMain.handle('dsh:newSession', () => ensureRuntime().newSession())
 ipcMain.handle('dsh:selectSession', (_e, id) => ensureRuntime().selectSession(id))
 ipcMain.handle('dsh:deleteSession', (_e, id) => ensureRuntime().deleteSession(id))
+ipcMain.handle('dsh:subagentSession', (_e, id) => {
+  const rt = ensureRuntime()
+  const s = rt.sessions.get(String(id ?? ''))
+  return s ? rt.snapshot(s) : null
+})
+ipcMain.handle('dsh:deleteSubagent', (_e, id) => ensureRuntime().deleteSubagent(String(id ?? '')))
+ipcMain.handle('dsh:markSubagentViewed', (_e, id) => {
+  ensureRuntime().markSubagentViewed(String(id ?? ''))
+  return { ok: true }
+})
 ipcMain.handle('dsh:renameSession', (_e, id, title) => ensureRuntime().renameSession(id, title))
 ipcMain.handle('dsh:togglePinSession', (_e, id) => ensureRuntime().togglePinSession(id))
 

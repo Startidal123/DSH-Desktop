@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { formatTokens } from '../markdown.js'
 
 function Ring({ percent }) {
@@ -31,8 +32,29 @@ function Row({ label, value, accent }) {
 
 const TODO_LABELS = { pending: '待办', in_progress: '进行中', completed: '已完成' }
 
-export default function StatsPanel({ session }) {
+const SUBAGENT_LABELS = { running: '工作中', ok: '待命', failed: '已关闭' }
+const subagentState = (sa) => SUBAGENT_LABELS[sa.status] ?? '已关闭'
+
+export default function StatsPanel({ session, onOpenSubagent }) {
   const hasData = session && Array.isArray(session.messages) && session.messages.length > 0
+  const todos = session?.todos ?? []
+  const subagents = session?.subagents ?? []
+  const [taskTab, setTaskTab] = useState(
+    () => todos.length === 0 && subagents.length > 0 ? 'subagents' : 'todos',
+  )
+  const [ctx, setCtx] = useState(null)
+
+  useEffect(() => {
+    if (!ctx) return
+    const close = () => setCtx(null)
+    const onKey = (e) => { if (e.key === 'Escape') setCtx(null) }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [ctx])
 
   // no conversation yet: collapse the whole right column instead of showing
   // empty placeholders
@@ -45,8 +67,10 @@ export default function StatsPanel({ session }) {
   const billedInput = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
   const total = billedInput + usage.outputTokens
   const hitRate = billedInput > 0 ? (usage.cacheReadTokens / billedInput) * 100 : 0
-  const todos = session?.todos ?? []
   const approvals = session?.approvals ?? []
+  const runningCount = subagents.filter(sa => sa.status === 'running').length
+  const standbyCount = subagents.filter(sa => sa.status === 'ok').length
+  const closedCount = subagents.length - runningCount - standbyCount
 
   return (
     <aside className="stats">
@@ -92,26 +116,92 @@ export default function StatsPanel({ session }) {
       </div>
 
       <div className="stat-card todo-card">
-        <div className="stat-card-title">任务清单</div>
-        {todos.length === 0 && <div className="todo-empty">暂无任务，agent 创建计划后显示在这里</div>}
-        <ul className="todo-list">
-          {todos.map((t, i) => (
-            <li key={i} className={`todo-item ${t.status}`}>
-              <span className={`todo-check ${t.status}`}>
-                {t.status === 'completed' && (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                )}
-                {t.status === 'in_progress' && <span className="spinner tiny" />}
-              </span>
-              <span className={`todo-text ${t.status}`}>{t.content}</span>
-              <span className="todo-state">{TODO_LABELS[t.status] ?? t.status}</span>
-            </li>
-          ))}
-        </ul>
+        <div className="task-card-head">
+          <div className="task-card-tabs">
+            <button
+              className={`task-tab ${taskTab === 'todos' ? 'active' : ''}`}
+              onClick={() => setTaskTab('todos')}
+            >
+              任务列表
+            </button>
+            <button
+              className={`task-tab ${taskTab === 'subagents' ? 'active' : ''}`}
+              onClick={() => setTaskTab('subagents')}
+            >
+              子代理列表{subagents.length > 0 ? ` ${subagents.length}` : ''}
+            </button>
+          </div>
+        </div>
+        {taskTab === 'todos' ? (
+          <>
+            {todos.length === 0 && <div className="todo-empty">暂无任务，agent 创建计划后显示在这里</div>}
+            <ul className="todo-list">
+              {todos.map((t, i) => (
+                <li key={i} className={`todo-item ${t.status}`}>
+                  <span className={`todo-check ${t.status}`}>
+                    {t.status === 'completed' && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                    )}
+                    {t.status === 'in_progress' && <span className="spinner tiny" />}
+                  </span>
+                  <span className={`todo-text ${t.status}`}>{t.content}</span>
+                  <span className="todo-state">{TODO_LABELS[t.status] ?? t.status}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <>
+            <div className="subagent-summary" title="正在工作 / 待命 / 已关闭">
+              <span className="subagent-sum-item"><span className="subagent-status-dot running" />{runningCount}</span>
+              <span className="subagent-sum-item"><span className="subagent-status-dot ok" />{standbyCount}</span>
+              <span className="subagent-sum-item"><span className="subagent-status-dot failed" />{closedCount}</span>
+            </div>
+            {subagents.length === 0 && <div className="todo-empty">暂无子代理，主代理派生子任务后显示在这里</div>}
+            {subagents.map(sa => (
+              <button
+                key={sa.id}
+                className="subagent-item"
+                onClick={() => onOpenSubagent?.(sa.id)}
+                onContextMenu={e => {
+                  e.preventDefault()
+                  setCtx({
+                    x: Math.min(e.clientX, window.innerWidth - 150),
+                    y: Math.min(e.clientY, window.innerHeight - 90),
+                    id: sa.id,
+                  })
+                }}
+                title="点击查看子代理对话，右键可删除"
+              >
+                {sa.status === 'ok' && !sa.viewed && <span className="unread-dot" />}
+                <span className="subagent-index">{sa.index}</span>
+                <span className="subagent-status-dot mini running-check">
+                  {sa.status === 'running'
+                    ? <span className="spinner tiny" />
+                    : <span className={`dot-fill ${sa.status === 'ok' ? 'ok' : 'failed'}`} />}
+                </span>
+                <span className="subagent-item-title">{sa.title || sa.id.slice(0, 8)}</span>
+                <span className="subagent-item-state">{subagentState(sa)}</span>
+              </button>
+            ))}
+          </>
+        )}
       </div>
+
+      {ctx && (
+        <div
+          className="ctx-menu"
+          style={{ left: ctx.x, top: ctx.y }}
+          onMouseDown={e => e.stopPropagation()}
+        >
+          <button className="danger" onClick={() => { window.dsh.deleteSubagent(ctx.id); setCtx(null) }}>
+            删除子代理
+          </button>
+        </div>
+      )}
     </aside>
   )
 }

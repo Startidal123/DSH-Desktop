@@ -8,6 +8,9 @@ const subscribe = (channel, callback) => {
 
 contextBridge.exposeInMainWorld('dsh', {
   getState: () => ipcRenderer.invoke('dsh:getState'),
+  subagentSession: (id) => ipcRenderer.invoke('dsh:subagentSession', id),
+  deleteSubagent: (id) => ipcRenderer.invoke('dsh:deleteSubagent', id),
+  markSubagentViewed: (id) => ipcRenderer.invoke('dsh:markSubagentViewed', id),
   newSession: () => ipcRenderer.invoke('dsh:newSession'),
   selectSession: (id) => ipcRenderer.invoke('dsh:selectSession', id),
   deleteSession: (id) => ipcRenderer.invoke('dsh:deleteSession', id),

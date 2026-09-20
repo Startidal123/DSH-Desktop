@@ -263,7 +263,7 @@ button {
   align-self: flex-end;
   margin-top: 4px;
 }
-.msg-row.user:hover .msg-meta { opacity: 1; }
+.msg-row.user.meta-showing .msg-meta { opacity: 1; }
 
 /* ---------- in-conversation find bar ---------- */
 .find-bar {
@@ -490,7 +490,7 @@ button {
 
 .jump-bottom {
   position: absolute;
-  bottom: 148px;
+  bottom: 10px;
   left: 50%;
   transform: translateX(-50%);
   color: var(--text-dim);
@@ -1160,15 +1160,29 @@ button {
 .send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* ---------- messages ---------- */
+.message-area {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
 .message-list {
   flex: 1;
   overflow-y: auto;
+  /* standard scrollbar: fully interactive (thumb dragging), themed thin */
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb, #2a3038) transparent;
   padding: 20px 24px 12px;
   display: flex;
   flex-direction: column;
   gap: 14px;
   min-height: 0;
 }
+/* children of a scrollable flex column must never compress: overflow:hidden
+ * items (tool cards) otherwise collapse to 0-min-height once the
+ * conversation outgrows the viewport — rendering as blank boxes */
+.message-list > * { flex-shrink: 0; }
 
 .welcome {
   margin: auto;
@@ -1193,6 +1207,49 @@ button {
 
 .msg-row { display: flex; flex-direction: column; }
 .msg-row.user { align-items: flex-end; }
+.relay-badge {
+  font-size: 0.640625rem;
+  color: var(--text-faint);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-bottom: -2px;
+  user-select: none;
+}
+
+/* ---------- activity chips (debug display) ---------- */
+.activity-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.activity-chip {
+  font-size: 0.640625rem;
+  line-height: 1.5;
+  color: var(--text-faint);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 0 8px;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+.activity-chip.tool {
+  cursor: pointer;
+  font-family: Consolas, monospace;
+  transition: color 0.12s, border-color 0.12s;
+}
+.activity-chip.tool:hover { border-color: var(--accent); color: var(--text-dim); }
+.activity-chip.tool.ok { color: var(--good); }
+.activity-chip.tool.error { color: var(--bad); }
+.activity-chip.tool.running { color: var(--warn); }
+.activity-chips .tool-card { margin: 2px 0 4px; max-width: 100%; width: 100%; }
 .user-bubble-group {
   display: flex;
   flex-direction: column;
@@ -1295,7 +1352,7 @@ button {
 .markdown-body pre code { background: none; border: none; padding: 0; font-size: 0.78125rem; line-height: 1.6; }
 .markdown-body a { color: #6ea0ff; }
 
-.msg-row:hover .msg-meta { opacity: 1; }
+.msg-row.meta-showing .msg-meta { opacity: 1; }
 .usage-tag {
   font-size: 0.6875rem;
   color: var(--text-faint);
@@ -1717,6 +1774,164 @@ button {
 .todo-text.in_progress { color: var(--text); }
 .todo-state { font-size: 0.65625rem; color: var(--text-faint); flex: none; padding-top: 2px; }
 
+/* ---------- stats: task list card (todos + subagents tabbed) ---------- */
+.task-card-head { display: flex; margin-bottom: 10px; }
+.task-card-tabs {
+  display: flex;
+  border: 1px solid var(--border-soft);
+  border-radius: 99px;
+  overflow: hidden;
+  flex: none;
+}
+.task-tab {
+  font-size: 0.6875rem;
+  padding: 3px 12px;
+  background: var(--bg-panel);
+  color: var(--text-faint);
+  border: none;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+.task-tab + .task-tab { border-left: 1px solid var(--border-soft); }
+.task-tab.active { background: var(--bg-hover); color: var(--text); font-weight: 500; }
+
+.subagent-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 5px 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.subagent-sum-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.subagent-card { display: flex; flex-direction: column; gap: 6px; }
+.subagent-item { position: relative; }
+.subagent-index {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: 0.66rem;
+  color: var(--text-faint);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  font-variant-numeric: tabular-nums;
+}
+.unread-dot {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e05c5c;
+  box-shadow: 0 0 0 1.5px var(--bg-card);
+}
+.subagent-status-dot.mini {
+  width: 10px;
+  height: 10px;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.dot-fill { width: 8px; height: 8px; border-radius: 50%; }
+.dot-fill.ok { background: var(--good); }
+.dot-fill.failed { background: var(--danger, #d95f5f); }
+.subagent-status-dot .spinner.tiny { width: 6px; height: 6px; }
+.subagent-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-dim);
+  font-size: 0.78125rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+.subagent-item:hover { border-color: var(--accent); color: var(--text); }
+.subagent-item-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.subagent-item-state { font-size: 0.65625rem; color: var(--text-faint); flex: none; }
+.subagent-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.subagent-status-dot.running { background: var(--warn); }
+.subagent-status-dot.ok { background: var(--good); }
+.subagent-status-dot.failed { background: var(--danger, #d95f5f); }
+.subagent-status-dot.running .spinner.tiny { width: 5px; height: 5px; }
+
+/* ---------- subagent viewer modal ---------- */
+/* NOTE: .modal.subagent-modal (two classes) — must outrank the .modal base
+ * rule that appears later in this file and would otherwise pin the width
+ * back to 440px */
+.modal.subagent-modal {
+  width: min(1920px, calc((100vw - 96px) * 0.75));
+  height: min(86vh, 980px);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.subagent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-soft);
+  flex: none;
+}
+.subagent-head-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.subagent-status-label { font-size: 0.6875rem; color: var(--text-faint); font-weight: 400; }
+.subagent-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb, #2a3038) transparent;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* same rule as the main message list: scrollable flex children must never
+ * compress (overflow:hidden tool cards would collapse into blank strips) */
+.subagent-messages > * { flex-shrink: 0; }
+.subagent-empty { color: var(--text-faint); font-size: 0.8125rem; text-align: center; padding: 32px 0; }
+
 /* ---------- modal ---------- */
 .modal-mask {
   position: fixed;
@@ -1898,13 +2113,13 @@ button {
 }
 
 /* ---------- settings · tool cards ---------- */
-.tool-card {
+.devtool-card {
   border: 1px solid var(--border-soft);
   border-radius: 10px;
   padding: 10px 13px;
   margin: 8px 0;
 }
-.tool-card.missing { border-color: rgba(224, 96, 96, 0.45); }
+.devtool-card.missing { border-color: rgba(224, 96, 96, 0.45); }
 .tool-card-head {
   display: flex;
   align-items: center;
@@ -2065,6 +2280,7 @@ button {
 .chat.welcome-mode {
   justify-content: center;
 }
+.chat.welcome-mode .message-area { flex: 0 0 auto; }
 .chat.welcome-mode .message-list {
   flex: 0 0 auto;
   overflow: hidden;
@@ -2093,8 +2309,11 @@ button {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  /* the strip overlays the chat scrollbar — it must never intercept drags */
+  pointer-events: none;
 }
 .stats-toggle {
+  pointer-events: auto;
   width: 30px;
   height: 42px;
   border-radius: 8px 0 0 8px;
