@@ -118,7 +118,7 @@
 |---|---|
 | `%APPDATA%\dsh-client\settings.json` | config：workspace / harnessDir / harnessRepo（设置页只读）/ clientUpdateRepo / clientAutoUpdate / provider / model / activeCustom / reasoningEffort / maxTokens / customModels[] / dsApiKey / dsBaseUrl / theme / **showToolActivity**（默认关：对话中隐藏工具与子代理启停消息，调试页开关）（harnessAutoUpdate 已废弃，更新仅手动）。**原子写**；`.bak` 上一版轮换 / `.bad` 坏文件隔离；支持手改（尾逗号/BOM 宽松恢复） |
 | `%APPDATA%\dsh-client\sessions.json` | 会话快照（消息/usage/todos/pinned/workspace） |
-| `%APPDATA%\dsh-client\attachments\` | 图片附件；`crash.log` 崩溃日志 |
+| `%APPDATA%\dsh-client\attachments\` | 图片附件；`crash.log` 崩溃日志；`errors.log` **生成失败日志**（每次 LLM 请求失败记录时间/会话/**生效端点与凭证状态**——区分官方无 key 还是网关坏 key；256KB 轮换至 .old，系统页可查路径） |
 | `~/.dsh/settings.yaml` | harness 全局：llm-deepseek 模型目录 |
 | `<harness>/.dsh-build-stamp` | 构建指纹（HEAD+补丁 md5） |
 | 渲染层 localStorage | `dsh-collapsed-msgs`（折叠记忆，≤400 条）/ `dsh-ws-collapsed`（分组折叠）/ 主题、右栏开关 |

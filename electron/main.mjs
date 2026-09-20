@@ -651,6 +651,7 @@ ipcMain.handle('dsh:configLocations', () => {
     sessions: resolve(userData, 'sessions.json'),
     attachments: attachmentsDir(),
     crashLog: resolve(userData, 'crash.log'),
+    errorLog: resolve(userData, 'errors.log'),
     folder: userData,
     // harness global config — the llm-deepseek model catalog where image
     // (multimodal) models are declared via inputModalities

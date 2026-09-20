@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { execSync } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, statSync, renameSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { resolve, dirname } from 'node:path'
 const DEFAULT_CONFIG = {
@@ -680,6 +680,29 @@ export class DshRuntime {
     }
   }
 
+  /** Persistent LLM failure log (errors.log beside sessions.json): records
+   *  WHEN a request failed, against WHICH endpoint/model/credential state —
+   *  the correlation that answers "was it the official endpoint without a
+   *  key, or the custom gateway with a bad one". Rotates at 256KB. */
+  appendErrorLog(session, detail) {
+    try {
+      const file = resolve(dirname(this.persistFile), 'errors.log')
+      try {
+        if (existsSync(file) && statSync(file).size > 262144) {
+          renameSync(file, `${file}.old`)
+        }
+      } catch { /* rotation is best effort */ }
+      const active = customModelActive(this.config)
+      const endpoint = active?.baseURL
+        ? `custom「${active.label}」 baseURL=${active.baseURL} model=${active.model} key=${active.apiKey ? '已设' : '空'}`
+        : `official model=${this.config.model} dsApiKey=${this.config.dsApiKey ? '已设' : '空'} dsBaseUrl=${this.config.dsBaseUrl || '默认'}`
+      appendFileSync(file,
+        `[${new Date().toLocaleString()}] 会话 ${session.id.slice(0, 8)}（${(session.title || '').slice(0, 20)}）\n` +
+        `  端点: ${endpoint}\n` +
+        `  错误: ${String(detail).slice(0, 300)}\n\n`)
+    } catch { /* best effort */ }
+  }
+
   applyStreamChunk(sessionId, frame) {
     if (!frame || frame.type !== 'chunk') return
     const s = this.sessions.get(sessionId)
@@ -807,6 +830,7 @@ export class DshRuntime {
         if (reason?.kind === 'error' && !this.userInterrupted) {
           const detail = reason.error?.message ?? JSON.stringify(reason.error ?? reason).slice(0, 200)
           s.messages.push({ kind: 'note-error', note: `生成失败：${detail}`, time: event.time })
+          this.appendErrorLog(s, detail)
         }
         this.userInterrupted = false
         break
