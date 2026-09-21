@@ -693,9 +693,16 @@ export class DshRuntime {
         }
       } catch { /* rotation is best effort */ }
       const active = customModelActive(this.config)
+      const keyState = active
+        ? (active.apiKey
+          ? `已设(${active.apiKey.length}字符 ${active.apiKey.slice(0, 4)}…${active.apiKey.slice(-4)})`
+          : '空')
+        : (this.config.dsApiKey
+          ? `已设(${this.config.dsApiKey.length}字符 ${this.config.dsApiKey.slice(0, 4)}…${this.config.dsApiKey.slice(-4)})`
+          : '空')
       const endpoint = active?.baseURL
-        ? `custom「${active.label}」 baseURL=${active.baseURL} model=${active.model} key=${active.apiKey ? '已设' : '空'}`
-        : `official model=${this.config.model} dsApiKey=${this.config.dsApiKey ? '已设' : '空'} dsBaseUrl=${this.config.dsBaseUrl || '默认'}`
+        ? `custom「${active.label}」 baseURL=${active.baseURL} model=${active.model} key=${keyState}`
+        : `official model=${this.config.model} dsApiKey=${keyState} dsBaseUrl=${this.config.dsBaseUrl || '默认'}`
       appendFileSync(file,
         `[${new Date().toLocaleString()}] 会话 ${session.id.slice(0, 8)}（${(session.title || '').slice(0, 20)}）\n` +
         `  端点: ${endpoint}\n` +
