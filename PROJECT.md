@@ -1,7 +1,7 @@
 # DSH Client 项目交接文档
 
 > 给下一个开发者（人或 AI）的完整地图。读完本文即可按需修改，无需通读源码。
-> 最后更新：2026-09-14 · 版本 0.1.0 · Electron 33 + React 18 + Vite 6
+> 最后更新：2026-09-21 · 版本 0.1.0 · Electron 33 + React 18 + Vite 6 · harness 已对齐 v0.1.6-alpha.2
 
 ## 1. 项目是什么
 
@@ -148,3 +148,31 @@ node scripts/make-icon.mjs  # 重新生成应用图标
 
 - 消息列表无虚拟化（几千条会卡）
 - 亮色主题下个别彩色元素未逐个适配
+- 模型可能自称"运行在 opencode 上"——训练数据幻觉（GLM 系列重灾区），全链路已验证无 opencode 字样；系统提示词实际身份是 "You are an AI agent powered by DeepSeek Harness"，可让模型复述首句验证
+
+## 10. 候选功能路线图（交接备查）
+
+> 2026-09-21 对照官方 web UI（`D:\dsh\deepseek-harness\packages\client\ui-*`，40+ 模块）做的调研结论与可行性评估，按价值×可行性分档。动手前先读对应模块的 README.zh.md。
+
+**第一档（推荐）**
+
+| 功能 | 官方参考 | 可行性与工作量 |
+|---|---|---|
+| 文件树 + 文档预览（右栏新标签页） | ui-sidebar-files / ui-sidebar-documentpreview | ★★★ 纯客户端（Electron 本地 FS），无 harness 依赖；中等 |
+| 子代理列表加 token 用量 + 活跃轮次耗时 | ui-subagent | ★★★ 数据已有（子代理会话逐消息 usage 已持久化）；小 |
+| ask_user_question 交互问答（模型提问→选择题界面） | ui-user-questions / interaction/tool-ask-user | ★☆ **已查实：sdk bundle（sdk-app/sdk-minimal）不含该工具**（web 专用）——需扩展 sdk-server.patch 注册工具 + 新增答案 RPC；中偏大 |
+
+**第二档（有条件）**
+
+| 功能 | 官方参考 | 卡点 |
+|---|---|---|
+| Token 用量明细（类型聚合+逐请求） | ui-trajectory | 无卡点——UI 曾完整实现后按需求回退（git 历史可复原），usage 数据层一直在积累 |
+| 每轮改动文件卡片 + diff 预览 | ui-deliverables | 轮级变更数据 harness 侧未对 sdk 协议暴露 |
+| @文件/会话引用（输入框补全） | ui-reference / ui-input-trigger | 需查 sdk 协议消息块格式 |
+| 权限预设（只读/工作区写/完全） | ui-permission-presets | 需 sdk-server.patch |
+| /命令菜单（/model 等） | ui-commands | 纯 UI，随时可做 |
+
+**已评估并否决**（避免重复讨论）
+
+- **集成终端**：独立开系统终端即可，不背 node-pty 原生模块的分发包袱（曾实施到打包配置层后回退，见 git 历史；node-pty 1.1.0 包内自带全平台预编译、滤 pdb 后约 1.2MB，若将来重启此需求方案现成）
+- 内置浏览器标签（WebContentsView 可做但优先级低）、消息点赞/点踩（自定义端点场景无意义）、goal/schedule/skills/workflow-run（依赖 harness 深层宿主服务）、dockkit 可停靠布局（重构成本高）
