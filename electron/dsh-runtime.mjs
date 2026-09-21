@@ -3,6 +3,7 @@ import { execSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, statSync, renameSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { resolve, dirname } from 'node:path'
+import { homedir } from 'node:os'
 const DEFAULT_CONFIG = {
   harnessDir: '',
   workspace: '',
@@ -419,8 +420,47 @@ export class DshRuntime {
     }
   }
 
+  /** harness ≥0.1.6 defaults the llm-deepseek wire protocol to the
+   *  Anthropic-style Messages API ({baseURL}/v1/messages with x-api-key) —
+   *  custom OpenAI-compatible gateways only serve /chat/completions with
+   *  Bearer auth and answer 401. Force the classic protocol through the
+   *  user-settings layer (which outranks the config default); an explicitly
+   *  configured protocol is left untouched. */
+  ensureChatCompletionsProtocol() {
+    try {
+      const pkg = JSON.parse(readFileSync(resolve(this.config.harnessDir, 'package.json'), 'utf8'))
+      const [maj, min, pat] = (pkg.version ?? '').split('.').map(p => parseInt(p, 10) || 0)
+      if (maj === 0 && !(min > 1 || (min === 1 && pat >= 6))) return
+      const file = resolve(homedir(), '.dsh', 'settings.yaml')
+      mkdirSync(dirname(file), { recursive: true })
+      let text = existsSync(file) ? readFileSync(file, 'utf8') : ''
+      const nl = text.includes('\r\n') ? '\r\n' : '\n'
+      const header = /^llm-deepseek:\s*$/m.exec(text)
+      if (header) {
+        const after = text.slice(header.index + header[0].length)
+        const nextTop = /^[^\s#]/m.exec(after)
+        const section = nextTop ? after.slice(0, nextTop.index) : after
+        if (/^\s+protocol:/m.test(section)) return
+        if (after.trim() === '') {
+          text += '  protocol: chat-completions' + nl
+        } else {
+          const skip = after.startsWith('\r\n') ? 2 : after.startsWith('\n') ? 1 : 0
+          const at = header.index + header[0].length + skip
+          text = text.slice(0, at) + '  protocol: chat-completions' + nl + text.slice(at)
+        }
+      } else {
+        if (text && !text.endsWith(nl)) text += nl
+        text += `${text ? nl : ''}llm-deepseek:${nl}  protocol: chat-completions${nl}`
+      }
+      const tmp = `${file}.tmp`
+      writeFileSync(tmp, text)
+      renameSync(tmp, file)
+    } catch { /* best effort — never block startup */ }
+  }
+
   async start() {
     this.onRuntime('starting')
+    this.ensureChatCompletionsProtocol()
     const envVars = {
       ...loadEnvFile(resolve(process.cwd(), '.env')),
       ...loadEnvFile(resolve(this.config.harnessDir, '.env')),
